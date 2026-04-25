@@ -3,57 +3,52 @@
 > A production-ready feature flag management service built with Rust, Axum, and PostgreSQL
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.82%2B-orange.svg)](https://www.rust-lang.org/)
+[![CI](https://github.com/Webrowse/feature-flag-service-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Webrowse/feature-flag-service-backend/actions/workflows/ci.yml)
 
 **[📖 Complete API Documentation →](./API.md)** | **[🧪 Postman Collection →](./postman_collection.json)**
 
 ## What Is This?
 
-A complete, self-hosted feature flag service that allows you to control feature rollouts, perform A/B testing, and target specific users with feature flags. This service provides both a management API for developers and an SDK endpoint for client applications to evaluate flags in real-time.
+A complete, self-hosted feature flag service that lets you control feature rollouts, run A/B tests, and target specific users — without touching your deployment pipeline. It provides a management API for developers and an SDK endpoint for client applications to evaluate flags in real-time.
 
 **Key Features:**
 
-- **Feature Flag Management**: Create, update, and toggle feature flags across multiple projects
-- **Sophisticated Targeting Rules**: Target users by ID, email, or email domain
-- **Percentage-Based Rollouts**: Gradually roll out features with consistent hashing
-- **Multi-Project Support**: Manage flags for multiple applications from a single service
-- **SDK Integration**: Public SDK endpoint with API key authentication
-- **Analytics Ready**: Tracks all flag evaluations for dashboards and reporting
-- **Secure by Default**: JWT authentication, Argon2 password hashing, user-scoped data access
-- **Type-Safe**: Rust with compile-time verified SQL queries
+- **Feature Flag Management** — Create, update, and toggle flags across projects and environments
+- **Targeting Rules** — Target users by ID, email address, or email domain
+- **Percentage Rollouts** — Gradual rollouts with consistent, stable hashing (same user always gets the same result)
+- **Multi-Environment Support** — Production, staging, and custom environments per project
+- **SDK Integration** — Lightweight SDK endpoint authenticated with an API key
+- **Analytics** — Every evaluation is logged for dashboards and reporting
+- **Secure** — JWT auth, Argon2 password hashing, user-scoped data access, no secrets in responses
 
 ## Architecture Overview
-
-This service provides two main interfaces:
-
-1. **Management API** (`/api/*`): For developers to create and manage feature flags, targeting rules, and projects
-2. **SDK API** (`/sdk/*`): For client applications to evaluate flags for end users
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                  Feature Flag Service                   │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  Management API          SDK API                        │
-│  (JWT Auth)              (SDK Key Auth)                 │
-│  ├── Projects            ├── Evaluate Flags             │
-│  ├── Flags               └── (Public Endpoint)          │
-│  ├── Rules                                              │
-│  └── Users                                              │
+│  Management API (/api/*)     SDK API (/sdk/*)           │
+│  JWT Authentication          SDK Key Authentication     │
+│  ├── Projects                ├── Evaluate all flags     │
+│  ├── Environments            └── for a given user       │
+│  ├── Feature Flags                                      │
+│  └── Targeting Rules                                    │
 │                                                         │
 │  ┌───────────────────────────────────────────┐          │
-│  │      Evaluation Engine                    │          │
-│  │  • Rule Matching (priority-based)         │          │
-│  │  • Percentage Rollout (consistent hash)   │          │
-│  │  • Evaluation Logging                     │          │
+│  │         Evaluation Engine                 │          │
+│  │  1. Global enabled/disabled check         │          │
+│  │  2. Targeting rules (priority order)      │          │
+│  │  3. Percentage rollout (FNV-1a hash)      │          │
+│  │  4. Async evaluation logging              │          │
 │  └───────────────────────────────────────────┘          │
 │                                                         │
 │  ┌───────────────────────────────────────────┐          │
 │  │         PostgreSQL Database               │          │
-│  │  • Users & Projects                       │          │
-│  │  • Feature Flags                          │          │
-│  │  • Targeting Rules                        │          │
-│  │  • Evaluation History                     │          │
+│  │  users · projects · environments          │          │
+│  │  feature_flags · flag_rules               │          │
+│  │  flag_evaluations                         │          │
 │  └───────────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -62,21 +57,20 @@ This service provides two main interfaces:
 
 ### Prerequisites
 
-- **Rust** 1.75+ ([Install Rust](https://www.rust-lang.org/tools/install))
-- **Docker** ([Install Docker](https://docs.docker.com/get-docker/))
-- **PostgreSQL 16+** (provided via Docker Compose)
+- **Rust** 1.82+ ([Install](https://www.rust-lang.org/tools/install))
+- **Docker** ([Install](https://docs.docker.com/get-docker/))
 
-### Get Started in 5 Steps
+### 5 Steps to Running Locally
 
 ```bash
 # 1. Clone the repository
-git clone git@github.com:Webrowse/feature-flag-service.git
-cd feature-flag-service
+git clone git@github.com:Webrowse/feature-flag-service-backend.git
+cd feature-flag-service-backend
 
-# 2. Setup environment variables
+# 2. Set up environment variables
 cp .env.example .env
-# IMPORTANT: Edit .env and change JWT_SECRET to a secure random string!
-# Generate secure secret with: openssl rand -base64 32
+# Edit .env — at minimum set a secure JWT_SECRET:
+#   openssl rand -base64 48
 
 # 3. Start PostgreSQL
 docker-compose up -d
@@ -87,122 +81,110 @@ sqlx migrate run
 
 # 5. Run the service
 cargo run
-
-# Server running at http://127.0.0.1:3000
+# → Listening on http://0.0.0.0:8080
 ```
 
-### Quick Test
+### Quick Test (curl)
 
 ```bash
-# 1. Register a user
-curl -X POST http://127.0.0.1:3000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"developer@example.com","password":"secure123"}'
+BASE=http://localhost:8080
 
-# 2. Login and get JWT token
-TOKEN=$(curl -X POST http://127.0.0.1:3000/auth/login \
+# Register
+curl -s -X POST $BASE/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"developer@example.com","password":"secure123"}' \
-  | jq -r '.token')
+  -d '{"email":"dev@example.com","password":"secure123"}'
 
-# 3. Create a project
-PROJECT=$(curl -X POST http://127.0.0.1:3000/api/projects \
+# Login — save the token
+TOKEN=$(curl -s -X POST $BASE/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"dev@example.com","password":"secure123"}' | jq -r '.token')
+
+# Create a project (also creates production + staging environments)
+PROJECT=$(curl -s -X POST $BASE/api/projects \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"My App","description":"Production app"}' \
+  -d '{"name":"My App"}' | jq -r '.id')
+
+SDK_KEY=$(curl -s $BASE/api/projects/$PROJECT \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.sdk_key')
+
+# Get the production environment ID
+ENV_ID=$(curl -s $BASE/api/projects/$PROJECT/environments \
+  -H "Authorization: Bearer $TOKEN" | jq -r '[.[] | select(.key=="production")][0].id')
+
+# Create a feature flag inside that environment
+FLAG=$(curl -s -X POST $BASE/api/projects/$PROJECT/environments/$ENV_ID/flags \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Dark Mode","key":"dark_mode","enabled":true,"rollout_percentage":50}' \
   | jq -r '.id')
 
-echo "Project created: $PROJECT"
-
-# 4. Create a feature flag
-curl -X POST http://127.0.0.1:3000/api/projects/$PROJECT/flags \
-  -H "Authorization: Bearer $TOKEN" \
+# Evaluate flags via SDK
+curl -s -X POST $BASE/sdk/v1/evaluate \
+  -H "X-SDK-Key: $SDK_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name":"Dark Mode",
-    "key":"dark_mode",
-    "description":"Enable dark mode UI",
-    "enabled":true,
-    "rollout_percentage":50
-  }'
+  -d '{"environment":"production","context":{"user_id":"user_42"}}'
 ```
 
 ### Using Postman
 
-For a better testing experience, import the provided Postman collection:
+Import [postman_collection.json](./postman_collection.json) for a pre-built collection that automatically saves tokens, IDs, and SDK keys across requests.
 
-1. **Import Collection**: Import [postman_collection.json](./postman_collection.json) into Postman
-2. **Auto-save Variables**: The collection automatically saves JWT tokens, project IDs, flag IDs, and SDK keys
-3. **Quick Start**:
-   - Run "Register User" → "Login" (saves JWT automatically)
-   - Run "Create Project" (saves project_id and sdk_key)
-   - Run "Create Flag" (saves flag_id)
-   - All subsequent requests will use these saved variables
-
-See [API.md](./API.md) for complete API documentation.
+---
 
 ## Core Concepts
 
 ### 1. Projects
 
-Projects represent your applications or services. Each project has:
-- A unique **SDK key** for client authentication
-- Multiple feature flags
-- User ownership (only you can access your projects)
+A project represents one of your applications. Creating a project automatically creates **production** and **staging** environments.
 
 ```bash
-# Create a project
 POST /api/projects
-{
-  "name": "Mobile App",
-  "description": "iOS and Android app"
-}
+{"name": "Mobile App", "description": "iOS and Android"}
+
+# Response includes sdk_key — used by your app to call /sdk/v1/evaluate
 ```
 
-### 2. Feature Flags
+### 2. Environments
 
-Feature flags control whether a feature is enabled for users. Each flag has:
-- **name**: Human-readable name (e.g., "Dark Mode")
-- **key**: Unique identifier (e.g., `dark_mode`) - lowercase alphanumeric, `_`, `-` only
-- **enabled**: Global on/off switch
-- **rollout_percentage**: 0-100% gradual rollout using consistent hashing
+Environments scope flags so production and staging can have independent states. Every flag lives inside an environment.
 
 ```bash
-# Create a feature flag
-POST /api/projects/{project_id}/flags
+GET  /api/projects/{project_id}/environments
+POST /api/projects/{project_id}/environments
+{"name": "Canary", "key": "canary"}
+```
+
+Environment keys must be lowercase letters, numbers, `_`, or `-`.
+
+### 3. Feature Flags
+
+A flag is a boolean switch that can target specific users or roll out gradually.
+
+```bash
+POST /api/projects/{project_id}/environments/{environment_id}/flags
 {
-  "name": "New Checkout Flow",
+  "name": "New Checkout",
   "key": "new_checkout",
-  "description": "Redesigned checkout experience",
   "enabled": true,
   "rollout_percentage": 25
 }
 ```
 
-### 3. Targeting Rules
+Flag keys must be lowercase letters, numbers, `_`, or `-`, starting with a letter.
 
-Rules allow you to target specific users before applying percentage rollouts. Rules are evaluated in **priority order** (higher priority first).
+### 4. Targeting Rules
 
-**Rule Types:**
+Rules evaluate before the rollout percentage. A matching rule immediately returns `true`, regardless of rollout. Rules run in **priority order** — highest number first.
 
-- **`user_id`**: Match specific user identifiers
-  ```json
-  {"rule_type": "user_id", "rule_value": "user_12345", "priority": 100}
-  ```
-
-- **`user_email`**: Match specific email addresses
-  ```json
-  {"rule_type": "user_email", "rule_value": "beta@example.com", "priority": 90}
-  ```
-
-- **`email_domain`**: Match email domains (must start with `@`)
-  ```json
-  {"rule_type": "email_domain", "rule_value": "@company.com", "priority": 80}
-  ```
+| `rule_type` | `rule_value` example | Matches when |
+|---|---|---|
+| `user_id` | `"user_12345"` | context.user_id equals value |
+| `user_email` | `"alice@example.com"` | context.user_email equals value |
+| `email_domain` | `"@company.com"` | email ends with this domain |
 
 ```bash
-# Create a targeting rule
-POST /api/projects/{project_id}/flags/{flag_id}/rules
+POST /api/projects/{project_id}/environments/{environment_id}/flags/{flag_id}/rules
 {
   "rule_type": "email_domain",
   "rule_value": "@yourcompany.com",
@@ -211,464 +193,360 @@ POST /api/projects/{project_id}/flags/{flag_id}/rules
 }
 ```
 
-### 4. Flag Evaluation
+### 5. Flag Evaluation
 
-The evaluation algorithm works as follows:
+The evaluation algorithm in order:
 
-1. **Check if flag is enabled**: If `enabled = false`, return `false` immediately
-2. **Evaluate targeting rules**: Check rules in priority order (highest first)
-   - If a rule matches, return `true`
-   - Only evaluate enabled rules
-3. **Apply percentage rollout**: Use consistent hashing on user identifier
-   - Hash the combination of flag key + user identifier
-   - Return `true` if hash falls within rollout percentage
-4. **Return result with reason**: Include explanation (e.g., "rule_match", "rollout", "disabled")
+1. **Global switch** — if `enabled = false`, return `false` immediately
+2. **Targeting rules** — evaluate enabled rules, highest priority first; first match returns `true`
+3. **Percentage rollout** — hash `flag_key:user_identifier` with FNV-1a; return `true` if bucket < rollout %
+4. **Default** — if `enabled = true` and no rollout set, return `true` for everyone
 
-**Example Evaluation:**
+**Evaluate all flags for a user:**
 
 ```bash
-# Evaluate all flags for a user
 POST /sdk/v1/evaluate
-Headers: X-SDK-Key: sdk_your_key_here
-Body:
-{
-  "user_id": "user_12345",
-  "user_email": "alice@example.com",
-  "custom_attributes": {}
-}
+X-SDK-Key: sdk_abc123...
+Content-Type: application/json
 
-# Response:
 {
-  "dark_mode": {
-    "enabled": true,
-    "reason": "rollout"
-  },
-  "new_checkout": {
-    "enabled": true,
-    "reason": "rule_match"
-  },
-  "premium_features": {
-    "enabled": false,
-    "reason": "disabled"
+  "environment": "production",
+  "context": {
+    "user_id": "user_42",
+    "user_email": "alice@example.com"
   }
 }
 ```
 
-## Project Structure
+```json
+{
+  "flags": {
+    "dark_mode": {
+      "enabled": true,
+      "reason": "User in 50% rollout"
+    },
+    "new_checkout": {
+      "enabled": true,
+      "reason": "Matched email_domain targeting rule"
+    },
+    "premium_features": {
+      "enabled": false,
+      "reason": "Flag is globally disabled"
+    }
+  }
+}
+```
 
-```
-feature-flag-service/
-├── migrations/                    # Database schema migrations
-│   ├── 20251130132949_create_users.sql
-│   ├── 20251130132950_create_tasks.sql
-│   └── 20251130132951_feature_flag.sql
-│
-├── src/
-│   ├── main.rs                    # Application entry point
-│   ├── config.rs                  # Environment configuration
-│   ├── state.rs                   # Shared AppState (DB pool)
-│   │
-│   ├── evaluation/                # Flag evaluation engine
-│   │   └── mod.rs                 # Core evaluation logic + tests
-│   │
-│   └── routes/                    # API route handlers
-│       ├── mod.rs                 # Route registration
-│       ├── health.rs              # Health check
-│       ├── auth.rs                # Registration & login
-│       ├── middleware_auth.rs     # JWT middleware
-│       ├── sdk_auth.rs            # SDK key middleware
-│       │
-│       ├── projects/              # Project management
-│       │   ├── mod.rs             # Models & validation
-│       │   └── routes.rs          # CRUD handlers
-│       │
-│       ├── flags/                 # Feature flag management
-│       │   ├── mod.rs             # Models & validation
-│       │   └── routes.rs          # CRUD + toggle handlers
-│       │
-│       ├── rules/                 # Targeting rules
-│       │   ├── mod.rs             # Models & validation
-│       │   └── routes.rs          # CRUD handlers
-│       │
-│       ├── sdk/                   # SDK endpoints
-│       │   ├── mod.rs             # Response models
-│       │   └── routes.rs          # Flag evaluation
-│       │
-│       └── tasks/                 # Legacy task management
-│           └── ...
-│
-├── test_*.sh                      # Integration test scripts
-├── API.md                         # Complete API documentation
-├── CONTRIBUTING.md                # Contribution guidelines
-├── Cargo.toml                     # Rust dependencies
-├── docker-compose.yml             # PostgreSQL setup
-└── .env                           # Configuration (gitignored)
-```
+---
 
 ## API Overview
 
-### Authentication Endpoints (Public)
+### Public Endpoints
 
-| Method | Endpoint          | Description        |
-|--------|-------------------|--------------------|
-| POST   | `/auth/register`  | Register new user  |
-| POST   | `/auth/login`     | Login and get JWT  |
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Health check (includes DB ping) |
+| POST | `/auth/register` | Register new user |
+| POST | `/auth/login` | Login, receive JWT |
 
-### Management API (JWT Required)
+### Management API — `Authorization: Bearer <token>` required
 
-**Projects:**
-| Method | Endpoint                              | Description              |
-|--------|---------------------------------------|--------------------------|
-| POST   | `/api/projects`                       | Create project           |
-| GET    | `/api/projects`                       | List your projects       |
-| GET    | `/api/projects/{id}`                  | Get project details      |
-| PUT    | `/api/projects/{id}`                  | Update project           |
-| DELETE | `/api/projects/{id}`                  | Delete project           |
-| POST   | `/api/projects/{id}/regenerate-key`   | Regenerate SDK key       |
+**Projects**
 
-**Feature Flags:**
-| Method | Endpoint                                      | Description        |
-|--------|-----------------------------------------------|--------------------|
-| POST   | `/api/projects/{pid}/flags`                   | Create flag        |
-| GET    | `/api/projects/{pid}/flags`                   | List flags         |
-| GET    | `/api/projects/{pid}/flags/{fid}`             | Get flag           |
-| PUT    | `/api/projects/{pid}/flags/{fid}`             | Update flag        |
-| DELETE | `/api/projects/{pid}/flags/{fid}`             | Delete flag        |
-| POST   | `/api/projects/{pid}/flags/{fid}/toggle`      | Toggle enabled     |
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/projects` | Create project |
+| GET | `/api/projects` | List your projects |
+| GET | `/api/projects/{id}` | Get project |
+| PUT | `/api/projects/{id}` | Update project |
+| DELETE | `/api/projects/{id}` | Delete project |
+| POST | `/api/projects/{id}/regenerate-key` | Rotate SDK key |
 
-**Targeting Rules:**
-| Method | Endpoint                                         | Description     |
-|--------|--------------------------------------------------|-----------------|
-| POST   | `/api/projects/{pid}/flags/{fid}/rules`          | Create rule     |
-| GET    | `/api/projects/{pid}/flags/{fid}/rules`          | List rules      |
-| GET    | `/api/projects/{pid}/flags/{fid}/rules/{rid}`    | Get rule        |
-| PUT    | `/api/projects/{pid}/flags/{fid}/rules/{rid}`    | Update rule     |
-| DELETE | `/api/projects/{pid}/flags/{fid}/rules/{rid}`    | Delete rule     |
+**Environments**
 
-### SDK API (SDK Key Required)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/projects/{pid}/environments` | Create environment |
+| GET | `/api/projects/{pid}/environments` | List environments |
+| GET | `/api/projects/{pid}/environments/{eid}` | Get environment |
+| PUT | `/api/projects/{pid}/environments/{eid}` | Update environment |
+| DELETE | `/api/projects/{pid}/environments/{eid}` | Delete environment |
 
-| Method | Endpoint             | Description                    |
-|--------|----------------------|--------------------------------|
-| POST   | `/sdk/v1/evaluate`   | Evaluate all flags for user    |
+**Feature Flags**
 
-**Headers:** `X-SDK-Key: sdk_your_key_here`
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/projects/{pid}/environments/{eid}/flags` | Create flag |
+| GET | `/api/projects/{pid}/environments/{eid}/flags` | List flags |
+| GET | `/api/projects/{pid}/environments/{eid}/flags/{fid}` | Get flag |
+| PUT | `/api/projects/{pid}/environments/{eid}/flags/{fid}` | Update flag |
+| DELETE | `/api/projects/{pid}/environments/{eid}/flags/{fid}` | Delete flag |
+| POST | `/api/projects/{pid}/environments/{eid}/flags/{fid}/toggle` | Toggle on/off |
 
-See [API.md](./API.md) for detailed documentation with examples.
+**Targeting Rules**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `.../flags/{fid}/rules` | Create rule |
+| GET | `.../flags/{fid}/rules` | List rules |
+| GET | `.../flags/{fid}/rules/{rid}` | Get rule |
+| PUT | `.../flags/{fid}/rules/{rid}` | Update rule |
+| DELETE | `.../flags/{fid}/rules/{rid}` | Delete rule |
+
+### SDK API — `X-SDK-Key: sdk_...` required
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/sdk/v1/evaluate` | Evaluate all flags for a user |
+
+See [API.md](./API.md) for complete request/response documentation.
+
+---
+
+## Project Structure
+
+```
+feature-flag-service-backend/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # CI (fmt, clippy, test) + CD (Docker → Railway)
+│
+├── migrations/
+│   ├── 20251130132949_create_users.sql
+│   ├── 20251130132951_feature_flag.sql
+│   ├── 20251225000000_create_environments.sql
+│   └── 20260101000000_production_fixes.sql
+│
+├── src/
+│   ├── main.rs                    # Startup: pool, CORS, timeout, graceful shutdown
+│   ├── config.rs                  # Env var loading and validation
+│   ├── state.rs                   # AppState (db pool + jwt_secret)
+│   │
+│   ├── evaluation/
+│   │   └── mod.rs                 # Evaluation engine + unit tests
+│   │
+│   └── routes/
+│       ├── mod.rs                 # Router wiring
+│       ├── auth.rs                # Register, login
+│       ├── health.rs              # Health check with DB ping
+│       ├── middleware_auth.rs     # JWT middleware + JwtUser extractor
+│       ├── sdk_auth.rs            # SDK key middleware + SdkProject extractor
+│       │
+│       ├── projects/
+│       ├── environments/
+│       ├── flags/
+│       ├── rules/
+│       └── sdk/
+│
+├── Dockerfile                     # Multi-stage production image
+├── docker-compose.yml             # Local Postgres
+├── Cargo.toml
+└── .env.example
+```
+
+---
 
 ## Database Schema
 
-### Core Tables
+| Table | Purpose |
+|---|---|
+| `users` | Auth — email + Argon2 password hash |
+| `projects` | Top-level grouping; holds the SDK key |
+| `environments` | Scopes flags (production, staging, etc.) |
+| `feature_flags` | Flag config per environment |
+| `flag_rules` | Targeting rules per flag |
+| `flag_evaluations` | Evaluation log for analytics |
 
-**users** - User authentication
-- `id` (UUID, PK)
-- `email` (TEXT, unique)
-- `password_hash` (TEXT)
-- `created_at` (TIMESTAMP)
+**Key constraints:**
+- Flag keys are unique per environment
+- `flag_rules.rule_type` is DB-enforced to `user_id | user_email | email_domain`
+- Deleting a project cascades to environments → flags → rules → evaluations
 
-**projects** - Feature flag projects
-- `id` (UUID, PK)
-- `name` (TEXT)
-- `description` (TEXT, nullable)
-- `sdk_key` (TEXT, globally unique, indexed)
-- `created_by` (UUID, FK → users)
-- `created_at`, `updated_at` (TIMESTAMPTZ)
-
-**feature_flags** - Feature flags
-- `id` (UUID, PK)
-- `project_id` (UUID, FK → projects, CASCADE)
-- `name` (TEXT)
-- `key` (TEXT, unique per project)
-- `description` (TEXT, nullable)
-- `enabled` (BOOLEAN, default FALSE)
-- `rollout_percentage` (INT, 0-100, default 0)
-- `created_at`, `updated_at` (TIMESTAMPTZ)
-
-**flag_rules** - Targeting rules
-- `id` (UUID, PK)
-- `flag_id` (UUID, FK → feature_flags, CASCADE)
-- `rule_type` (TEXT: user_id, user_email, email_domain)
-- `rule_value` (TEXT)
-- `enabled` (BOOLEAN, default TRUE)
-- `priority` (INT, default 0)
-- `created_at` (TIMESTAMPTZ)
-
-**flag_evaluations** - Evaluation history (analytics)
-- `id` (BIGSERIAL, PK)
-- `flag_id` (UUID, FK → feature_flags, CASCADE)
-- `user_identifier` (TEXT)
-- `result` (BOOLEAN)
-- `evaluated_at` (TIMESTAMPTZ)
-
-### Indexes for Performance
-
-- `idx_projects_created_by` - Fast user project lookup
-- `idx_flags_project` - Fast flag lookup per project
-- `idx_flags_project_key` - Unique key constraint per project
-- `idx_rules_flag` - Fast rule lookup per flag
-- `idx_rules_flag_priority` - Rule ordering for evaluation
-- `idx_evaluations_flag_time` - Analytics queries
-- `idx_project_sdk_key` - SDK key authentication
+---
 
 ## Tech Stack
 
-| Component          | Technology               | Purpose                           |
-|--------------------|--------------------------|-----------------------------------|
-| Language           | Rust 1.75+               | Performance & safety              |
-| Web Framework      | Axum 0.8.7               | Async, type-safe HTTP             |
-| Database           | PostgreSQL 16            | Persistent storage                |
-| DB Driver          | SQLx 0.8.6               | Compile-time verified queries     |
-| Runtime            | Tokio                    | Async executor                    |
-| Authentication     | JWT (jsonwebtoken 9.0)   | Token-based auth                  |
-| Password Hashing   | Argon2 0.5.3             | Memory-hard hashing               |
-| Serialization      | serde 1.0 + serde_json   | JSON API                          |
-| CORS               | tower-http               | Cross-origin requests             |
+| Component | Technology |
+|---|---|
+| Language | Rust 1.82+ |
+| Web framework | Axum 0.8 |
+| Database | PostgreSQL 16 |
+| DB driver | SQLx 0.8 (compile-time verified queries) |
+| Async runtime | Tokio |
+| Auth | JWT (jsonwebtoken 9), Argon2 |
+| Observability | tracing + tracing-subscriber |
+| CORS / Timeout | tower-http |
 
-## Security Features
+---
 
-- **JWT Authentication**: 24-hour token validity with secure signing
-- **Argon2 Password Hashing**: Memory-hard algorithm with per-password salts
-- **SQL Injection Protection**: Compile-time verified queries via SQLx
-- **User Scoping**: Users can only access their own projects and flags
-- **SDK Key Authentication**: Secure API keys for public SDK endpoints
-- **No Plaintext Secrets**: All sensitive data properly hashed/encrypted
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | — | Postgres connection string |
+| `JWT_SECRET` | Yes | — | Signing key, minimum 32 characters |
+| `PORT` | Yes | — | Port to listen on |
+| `HOST` | No | `0.0.0.0` | Bind address |
+| `ALLOWED_ORIGIN` | No | `http://localhost:3000` | CORS allowed origin |
+| `RUST_LOG` | No | `info` | Log level |
+
+Generate a secure JWT secret:
+```bash
+openssl rand -base64 48
+```
+
+---
 
 ## Development
 
-### Running Tests
-
 ```bash
-# Use Postman collection for interactive testing
-# Import postman_collection.json for organized CRUD operations
-```
+# Run tests (15 unit tests, no DB required)
+cargo test
 
-### Code Quality
+# Lint
+cargo clippy --all-targets -- -D warnings
 
-```bash
-# Lint code
-cargo clippy
-
-# Format code
+# Format
 cargo fmt
 
-# Check for issues
-cargo check
+# Add a migration
+sqlx migrate add my_migration_name
+
+# Regenerate sqlx offline cache after schema changes
+cargo sqlx prepare
 ```
 
-### Database Migrations
-
-```bash
-# Create new migration
-# Example names: create_users, add_projects_table, add_email_index
-sqlx migrate add create_feature_flags
-
-# Run migrations
-sqlx migrate run
-
-# Revert last migration
-sqlx migrate revert
-```
+---
 
 ## Production Deployment
 
-### Environment Variables
-
-**Critical Configuration:**
-
-```env
-# Server
-PORT=3000
-
-# Database
-DATABASE_URL=postgresql://user:password@host:5432/dbname
-
-# Security
-JWT_SECRET=your_super_secure_random_secret_at_least_32_characters_long
-
-# Optional
-RUST_LOG=info
-```
-
-### Build for Production
+### Docker (manual)
 
 ```bash
-# Build optimized release binary
-cargo build --release
+docker build -t feature-flag-service .
 
-# Binary location
-./target/release/feature-flag-service
-
-# Run
-./target/release/feature-flag-service
+docker run -d \
+  -e DATABASE_URL="postgres://..." \
+  -e JWT_SECRET="..." \
+  -e ALLOWED_ORIGIN="https://your-frontend.com" \
+  -e PORT=8080 \
+  -p 8080:8080 \
+  feature-flag-service
 ```
 
-### Docker Deployment
+### Railway (recommended)
 
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
+1. Push to GitHub
+2. New project → Deploy from GitHub repo (Railway detects the Dockerfile)
+3. Add a PostgreSQL database from the Railway dashboard
+4. Set `JWT_SECRET`, `ALLOWED_ORIGIN`, `PORT=8080` in Variables
+5. Run migrations via the Railway shell: `sqlx migrate run`
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+The CI/CD workflow in `.github/workflows/ci.yml` runs tests on every push and deploys automatically on merge to `master`.
 
-COPY --from=builder /app/target/release/feature-flag-service /usr/local/bin/
-COPY migrations /migrations
-
-ENV PORT=3000
-EXPOSE 3000
-
-CMD ["feature-flag-service"]
-```
+---
 
 ## Use Cases
 
-### Gradual Feature Rollout
-
-Roll out a new feature to 10% of users, then gradually increase:
+### Gradual rollout
 
 ```bash
-# Start with 10%
-curl -X POST http://localhost:3000/api/projects/$PROJECT/flags \
-  -H "Authorization: Bearer $TOKEN" \
+# Start at 10%, increase over time
+curl -X POST .../flags \
   -d '{"name":"New UI","key":"new_ui","enabled":true,"rollout_percentage":10}'
 
-# Increase to 50%
-curl -X PUT http://localhost:3000/api/projects/$PROJECT/flags/$FLAG \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X PUT .../flags/$FLAG_ID \
   -d '{"rollout_percentage":50}'
 
-# Full rollout
-curl -X PUT http://localhost:3000/api/projects/$PROJECT/flags/$FLAG \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X PUT .../flags/$FLAG_ID \
   -d '{"rollout_percentage":100}'
 ```
 
-### Internal Beta Testing
-
-Enable features for your company's email domain:
+### Internal beta (company email domain)
 
 ```bash
-# Create rule for company domain
-curl -X POST http://localhost:3000/api/projects/$PROJECT/flags/$FLAG/rules \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "rule_type":"email_domain",
-    "rule_value":"@yourcompany.com",
-    "priority":100,
-    "enabled":true
-  }'
+curl -X POST .../flags/$FLAG_ID/rules \
+  -d '{"rule_type":"email_domain","rule_value":"@yourcompany.com","priority":100}'
 ```
 
-### VIP User Access
-
-Give specific users early access:
+### VIP early access
 
 ```bash
-# Target specific user
-curl -X POST http://localhost:3000/api/projects/$PROJECT/flags/$FLAG/rules \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "rule_type":"user_email",
-    "rule_value":"vip@example.com",
-    "priority":100,
-    "enabled":true
-  }'
+curl -X POST .../flags/$FLAG_ID/rules \
+  -d '{"rule_type":"user_email","rule_value":"vip@example.com","priority":100}'
 ```
 
-### Kill Switch
-
-Quickly disable a problematic feature:
+### Emergency kill switch
 
 ```bash
-# Disable flag immediately
-curl -X POST http://localhost:3000/api/projects/$PROJECT/flags/$FLAG/toggle \
-  -H "Authorization: Bearer $TOKEN"
+curl -X POST .../flags/$FLAG_ID/toggle
 ```
+
+---
 
 ## Client Integration
 
-### Example: JavaScript/TypeScript SDK
+### JavaScript / TypeScript
 
 ```typescript
 class FeatureFlagClient {
   constructor(private sdkKey: string, private baseUrl: string) {}
 
-  async evaluateFlags(userId: string, userEmail?: string) {
-    const response = await fetch(`${this.baseUrl}/sdk/v1/evaluate`, {
+  async evaluate(environment: string, userId: string, userEmail?: string) {
+    const res = await fetch(`${this.baseUrl}/sdk/v1/evaluate`, {
       method: 'POST',
       headers: {
         'X-SDK-Key': this.sdkKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        user_id: userId,
-        user_email: userEmail,
-        custom_attributes: {},
+        environment,
+        context: { user_id: userId, user_email: userEmail },
       }),
     });
-
-    return await response.json();
+    const data = await res.json();
+    return data.flags as Record<string, { enabled: boolean; reason: string }>;
   }
 
-  async isEnabled(flagKey: string, userId: string, userEmail?: string) {
-    const flags = await this.evaluateFlags(userId, userEmail);
-    return flags[flagKey]?.enabled ?? false;
+  async isEnabled(flag: string, environment: string, userId: string) {
+    const flags = await this.evaluate(environment, userId);
+    return flags[flag]?.enabled ?? false;
   }
 }
 
 // Usage
-const client = new FeatureFlagClient(
-  'sdk_your_key_here',
-  'https://flags.yourdomain.com'
-);
+const client = new FeatureFlagClient('sdk_abc123...', 'https://your-api.railway.app');
 
-if (await client.isEnabled('dark_mode', 'user_123', 'user@example.com')) {
-  // Show dark mode
+if (await client.isEnabled('dark_mode', 'production', 'user_42')) {
+  enableDarkMode();
 }
 ```
 
-## Performance Considerations
+---
 
-- **Consistent Hashing**: Ensures same user always gets same rollout decision
-- **Database Indexes**: Optimized for fast flag evaluation queries
-- **Connection Pooling**: SQLx connection pool for concurrent requests
-- **Compile-Time Queries**: Zero runtime SQL parsing overhead
-- **Async I/O**: Non-blocking request handling with Tokio
+## Performance
 
-**Typical Performance:**
-- Flag evaluation: < 10ms (including DB query)
-- Rule matching: O(n) where n = number of rules per flag
-- Scales to millions of evaluations/day on modest hardware
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Support
-
-- **Issues**: Report bugs at [GitHub Issues](https://github.com/yourusername/feature-flag-service/issues)
-- **Documentation**: See [API.md](./API.md) for complete API reference
-- **Tests**: Run integration tests with `./test_*.sh` scripts
-
-## Acknowledgments
-
-Built with these excellent Rust crates:
-
-- [Axum](https://github.com/tokio-rs/axum) - Ergonomic web framework
-- [SQLx](https://github.com/launchbadge/sqlx) - Type-safe SQL toolkit
-- [Tokio](https://tokio.rs/) - Async runtime
-- [Argon2](https://github.com/RustCrypto/password-hashes) - Secure password hashing
-- [jsonwebtoken](https://github.com/Keats/jsonwebtoken) - JWT implementation
-- [serde](https://serde.rs/) - Serialization framework
+- Flag evaluation typically completes in **< 10ms** end-to-end (two DB queries: one for flags, one batch for all rules)
+- Evaluation logs are written **asynchronously** (`tokio::spawn`) and never block the response
+- DB pool is capped at **20 connections** with a 5-second acquire timeout
+- All requests time out after **30 seconds**
+- Rollout hashing uses FNV-1a — deterministic across deployments, O(1) per user
 
 ---
 
-**Built with Rust** | Production-ready feature flag management
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## License
+
+MIT — see LICENSE file.
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/Webrowse/feature-flag-service-backend/issues)
+- **API Reference**: [API.md](./API.md)
+
+---
+
+Built with Rust 🦀
