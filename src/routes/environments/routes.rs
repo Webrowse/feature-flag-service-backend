@@ -13,17 +13,31 @@ use super::{
 use crate::routes::middleware_auth::JwtUser;
 use crate::state::AppState;
 
-/// Create a new environment within a project
+const MAX_NAME_LEN: usize = 255;
+
+fn validate_name(name: &str) -> Result<(), (StatusCode, String)> {
+    let t = name.trim();
+    if t.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Name cannot be empty".to_string()));
+    }
+    if t.len() > MAX_NAME_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Name must be {} characters or fewer", MAX_NAME_LEN),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn create(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path(project_id): Path<Uuid>,
     Json(payload): Json<CreateEnvironmentRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Validate environment key
+    validate_name(&payload.name)?;
     validate_environment_key(&payload.key).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    // Check if project exists and is owned by the user
     let project_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND created_by = $2)",
     )
@@ -32,7 +46,7 @@ pub async fn create(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check project: {:?}", e);
+        tracing::error!("Failed to check project: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -40,7 +54,6 @@ pub async fn create(
         return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
     }
 
-    // Create the environment
     let environment = match sqlx::query_as::<_, Environment>(
         r#"
         INSERT INTO environments (project_id, name, key, description)
@@ -49,7 +62,7 @@ pub async fn create(
         "#,
     )
     .bind(project_id)
-    .bind(&payload.name)
+    .bind(payload.name.trim())
     .bind(&payload.key)
     .bind(&payload.description)
     .fetch_one(&state.db)
@@ -65,33 +78,30 @@ pub async fn create(
                     ));
                 }
             }
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", e),
-            ));
+            tracing::error!("Failed to create environment: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()));
         }
     };
 
-    let response = EnvironmentResponse {
-        id: environment.id,
-        project_id: environment.project_id,
-        name: environment.name,
-        key: environment.key,
-        description: environment.description,
-        created_at: environment.created_at,
-        updated_at: environment.updated_at,
-    };
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((
+        StatusCode::CREATED,
+        Json(EnvironmentResponse {
+            id: environment.id,
+            project_id: environment.project_id,
+            name: environment.name,
+            key: environment.key,
+            description: environment.description,
+            created_at: environment.created_at,
+            updated_at: environment.updated_at,
+        }),
+    ))
 }
 
-/// List all environments for a project
 pub async fn list(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Check if project exists and is owned by the user
     let project_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND created_by = $2)",
     )
@@ -100,7 +110,7 @@ pub async fn list(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check project: {:?}", e);
+        tracing::error!("Failed to check project: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -120,11 +130,8 @@ pub async fn list(
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch environments: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to fetch environments".to_string(),
-        )
+        tracing::error!("Failed to fetch environments: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     let response: Vec<EnvironmentResponse> = environments
@@ -143,7 +150,6 @@ pub async fn list(
     Ok(Json(response))
 }
 
-/// Get a single environment by ID
 pub async fn get(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
@@ -163,38 +169,38 @@ pub async fn get(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch environment: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to fetch environment".to_string(),
-        )
+        tracing::error!("Failed to fetch environment: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     match environment {
-        Some(e) => {
-            let response = EnvironmentResponse {
-                id: e.id,
-                project_id: e.project_id,
-                name: e.name,
-                key: e.key,
-                description: e.description,
-                created_at: e.created_at,
-                updated_at: e.updated_at,
-            };
-            Ok(Json(response))
-        }
+        Some(e) => Ok(Json(EnvironmentResponse {
+            id: e.id,
+            project_id: e.project_id,
+            name: e.name,
+            key: e.key,
+            description: e.description,
+            created_at: e.created_at,
+            updated_at: e.updated_at,
+        })),
         None => Err((StatusCode::NOT_FOUND, "Environment not found".to_string())),
     }
 }
 
-/// Update an environment
 pub async fn update(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path((project_id, environment_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdateEnvironmentRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Check if environment exists and user owns the project
+    if payload.name.is_none() && payload.description.is_none() {
+        return Err((StatusCode::BAD_REQUEST, "No fields to update".to_string()));
+    }
+
+    if let Some(ref name) = payload.name {
+        validate_name(name)?;
+    }
+
     let exists = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -210,7 +216,7 @@ pub async fn update(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check environment: {:?}", e);
+        tracing::error!("Failed to check environment: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -222,27 +228,24 @@ pub async fn update(
         r#"
         UPDATE environments
         SET
-            name = COALESCE($2, name),
+            name        = COALESCE($2, name),
             description = COALESCE($3, description),
-            updated_at = NOW()
+            updated_at  = NOW()
         WHERE id = $1
         RETURNING id, project_id, name, key, description, created_at, updated_at
         "#,
     )
     .bind(environment_id)
-    .bind(payload.name.as_deref())
+    .bind(payload.name.as_deref().map(str::trim))
     .bind(payload.description.as_deref())
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to update environment: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to update environment".to_string(),
-        )
+        tracing::error!("Failed to update environment: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
-    let response = EnvironmentResponse {
+    Ok(Json(EnvironmentResponse {
         id: environment.id,
         project_id: environment.project_id,
         name: environment.name,
@@ -250,12 +253,9 @@ pub async fn update(
         description: environment.description,
         created_at: environment.created_at,
         updated_at: environment.updated_at,
-    };
-
-    Ok(Json(response))
+    }))
 }
 
-/// Delete an environment (this will cascade delete all flags in this environment)
 pub async fn delete(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
@@ -274,11 +274,8 @@ pub async fn delete(
     .execute(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to delete environment: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to delete environment".to_string(),
-        )
+        tracing::error!("Failed to delete environment: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     if result.rows_affected() == 0 {

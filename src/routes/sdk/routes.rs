@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -12,7 +7,6 @@ use crate::routes::sdk_auth::SdkProject;
 use crate::state::AppState;
 use super::{EvaluateRequest, EvaluateResponse, FlagState};
 
-// Database row types for batch queries
 #[derive(Debug, sqlx::FromRow)]
 struct EnvironmentRow {
     id: Uuid,
@@ -35,30 +29,29 @@ struct RuleRow {
     priority: i32,
 }
 
-/// Evaluate all flags for a project/environment based on user context
-/// Uses optimized batch loading of rules to minimize database round trips
 pub async fn evaluate(
     State(state): State<AppState>,
     SdkProject(project_id): SdkProject,
     Json(request): Json<EvaluateRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let context = request.context;
-    let environment_key = request.environment;
+    let environment_key = request.environment.trim().to_string();
 
-    // Step 1: Verify environment exists and get environment_id
+    if environment_key.is_empty() || environment_key.len() > 64 {
+        return Err((StatusCode::BAD_REQUEST, "Invalid environment key".to_string()));
+    }
+
+    let context = request.context;
+
     let environment: Option<EnvironmentRow> = sqlx::query_as(
-        r#"
-        SELECT id FROM environments
-        WHERE project_id = $1 AND key = $2
-        "#,
+        r#"SELECT id FROM environments WHERE project_id = $1 AND key = $2"#,
     )
     .bind(project_id)
     .bind(&environment_key)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch environment: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch environment".to_string())
+        tracing::error!("Failed to fetch environment: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     let environment_id = match environment {
@@ -71,20 +64,15 @@ pub async fn evaluate(
         }
     };
 
-    // Step 2: Fetch all flags for this environment in one query
     let flags: Vec<FlagRow> = sqlx::query_as(
-        r#"
-        SELECT id, key, enabled, rollout_percentage
-        FROM feature_flags
-        WHERE environment_id = $1
-        "#,
+        r#"SELECT id, key, enabled, rollout_percentage FROM feature_flags WHERE environment_id = $1"#,
     )
     .bind(environment_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch flags: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch flags".to_string())
+        tracing::error!("Failed to fetch flags: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     if flags.is_empty() {
@@ -93,10 +81,8 @@ pub async fn evaluate(
         }));
     }
 
-    // Step 3: Collect all flag IDs for batch rule loading
     let flag_ids: Vec<Uuid> = flags.iter().map(|f| f.id).collect();
 
-    // Step 4: Preload ALL rules for ALL flags in ONE query (key optimization!)
     let rules: Vec<RuleRow> = sqlx::query_as(
         r#"
         SELECT flag_id, rule_type, rule_value, enabled, priority
@@ -109,51 +95,50 @@ pub async fn evaluate(
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch rules: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch rules".to_string())
+        tracing::error!("Failed to fetch rules: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
-    // Step 5: Build a HashMap<flag_id, Vec<RuleData>> for fast lookup
     let mut rules_by_flag: HashMap<Uuid, Vec<RuleData>> = HashMap::new();
     for rule in rules {
-        let rule_data = RuleData {
-            rule_type: rule.rule_type,
-            rule_value: rule.rule_value,
-            enabled: rule.enabled,
-            priority: rule.priority,
-        };
         rules_by_flag
             .entry(rule.flag_id)
-            .or_insert_with(Vec::new)
-            .push(rule_data);
+            .or_default()
+            .push(RuleData {
+                rule_type: rule.rule_type,
+                rule_value: rule.rule_value,
+                enabled: rule.enabled,
+                priority: rule.priority,
+            });
     }
-
-    // Step 6: Evaluate each flag using the preloaded rules
-    let mut result_flags = HashMap::new();
-    let mut evaluation_records = Vec::new();
 
     let user_identifier = context
         .user_id
-        .as_ref()
-        .or(context.user_email.as_ref())
-        .map(|s| s.as_str())
+        .as_deref()
+        .or(context.user_email.as_deref())
         .unwrap_or("anonymous");
 
+    let mut result_flags = HashMap::new();
+    let mut eval_flag_ids: Vec<Uuid> = Vec::new();
+    let mut eval_user_ids: Vec<String> = Vec::new();
+    let mut eval_results: Vec<bool> = Vec::new();
+
     for flag in &flags {
-        // Get rules for this flag from our preloaded HashMap (O(1) lookup)
-        let flag_rules = rules_by_flag.get(&flag.id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let flag_rules = rules_by_flag
+            .get(&flag.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
 
-        // Convert to evaluation types
-        let flag_data = FlagData {
-            key: flag.key.clone(),
-            enabled: flag.enabled,
-            rollout_percentage: flag.rollout_percentage,
-        };
+        let evaluation = evaluate_flag(
+            &FlagData {
+                key: flag.key.clone(),
+                enabled: flag.enabled,
+                rollout_percentage: flag.rollout_percentage,
+            },
+            flag_rules,
+            &context,
+        );
 
-        // Evaluate the flag
-        let evaluation = evaluate_flag(&flag_data, flag_rules, &context);
-
-        // Store result
         result_flags.insert(
             flag.key.clone(),
             FlagState {
@@ -162,29 +147,29 @@ pub async fn evaluate(
             },
         );
 
-        // Collect evaluation record for batch insert
-        evaluation_records.push((flag.id, user_identifier.to_string(), evaluation.enabled));
+        eval_flag_ids.push(flag.id);
+        eval_user_ids.push(user_identifier.to_string());
+        eval_results.push(evaluation.enabled);
     }
 
-    // Step 7: Batch insert evaluation logs (async, don't block response)
-    // Using a single INSERT with multiple values for efficiency
-    if !evaluation_records.is_empty() {
-        let flag_ids: Vec<Uuid> = evaluation_records.iter().map(|(id, _, _)| *id).collect();
-        let user_ids: Vec<String> = evaluation_records.iter().map(|(_, u, _)| u.clone()).collect();
-        let results: Vec<bool> = evaluation_records.iter().map(|(_, _, r)| *r).collect();
-
-        let _ = sqlx::query(
+    // Fire-and-forget: log evaluations without blocking the response.
+    let db = state.db.clone();
+    tokio::spawn(async move {
+        if let Err(e) = sqlx::query(
             r#"
             INSERT INTO flag_evaluations (flag_id, user_identifier, result)
             SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::bool[])
             "#,
         )
-        .bind(&flag_ids)
-        .bind(&user_ids)
-        .bind(&results)
-        .execute(&state.db)
-        .await;
-    }
+        .bind(&eval_flag_ids)
+        .bind(&eval_user_ids)
+        .bind(&eval_results)
+        .execute(&db)
+        .await
+        {
+            tracing::error!("Failed to write evaluation logs: {}", e);
+        }
+    });
 
     Ok(Json(EvaluateResponse { flags: result_flags }))
 }

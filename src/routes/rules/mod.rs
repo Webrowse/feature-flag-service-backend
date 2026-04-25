@@ -1,10 +1,8 @@
 pub mod routes;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
-// MODELS
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct FlagRule {
@@ -43,9 +41,6 @@ pub struct RuleResponse {
     pub created_at: DateTime<Utc>,
 }
 
-// HELPER FUNCTIONS
-
-/// Validate rule type
 pub fn validate_rule_type(rule_type: &str) -> Result<(), String> {
     match rule_type {
         "user_id" | "user_email" | "email_domain" => Ok(()),
@@ -56,12 +51,10 @@ pub fn validate_rule_type(rule_type: &str) -> Result<(), String> {
     }
 }
 
-/// Validate rule value based on type
 pub fn validate_rule_value(rule_type: &str, rule_value: &str) -> Result<(), String> {
     if rule_value.trim().is_empty() {
         return Err("Rule value cannot be empty".to_string());
     }
-
     match rule_type {
         "email_domain" => {
             if !rule_value.starts_with('@') {
@@ -76,14 +69,8 @@ pub fn validate_rule_value(rule_type: &str, rule_value: &str) -> Result<(), Stri
                 return Err("Invalid email format".to_string());
             }
         }
-        "user_id" => {
-            if rule_value.len() < 1 {
-                return Err("User ID cannot be empty".to_string());
-            }
-        }
         _ => {}
     }
-
     Ok(())
 }
 
@@ -101,16 +88,13 @@ mod tests {
 
     #[test]
     fn test_validate_rule_value() {
-        // Email domain
         assert!(validate_rule_value("email_domain", "@company.com").is_ok());
         assert!(validate_rule_value("email_domain", "company.com").is_err());
         assert!(validate_rule_value("email_domain", "@c").is_err());
 
-        // User email
         assert!(validate_rule_value("user_email", "user@example.com").is_ok());
         assert!(validate_rule_value("user_email", "invalid").is_err());
 
-        // User ID
         assert!(validate_rule_value("user_id", "user_123").is_ok());
         assert!(validate_rule_value("user_id", "").is_err());
     }

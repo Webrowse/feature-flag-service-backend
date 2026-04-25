@@ -1,10 +1,8 @@
 pub mod routes;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
-
-// MODELS
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct FeatureFlag {
@@ -51,42 +49,34 @@ pub struct FlagResponse {
     pub updated_at: DateTime<Utc>,
 }
 
-// HELPER FUNCTIONS
-
-// Validating the flag key
 pub fn validate_flag_key(key: &str) -> Result<(), String> {
-    if key.is_empty() {                                         // Checks if flag key is empty
+    if key.is_empty() {
         return Err("Flag key cannot be empty".to_string());
     }
-
-    if key.len()>64 {
-        return Err("Flag key is too long (Max: 64 characters)".to_string());      // Max size of flag
+    if key.len() > 64 {
+        return Err("Flag key is too long (max 64 characters)".to_string());
     }
-
-    if !key.chars().next().unwrap().is_ascii_alphabetic() {
-        return Err("Flag must start with an alphabet".to_string());
+    if !key.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+        return Err("Flag key must start with a lowercase letter".to_string());
     }
-
-    if !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-') {
-        return Err("flag can only be \n - lowercase letters\n - numbers\n - underscores\n - and hypens.".to_string());
+    if !key
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    {
+        return Err(
+            "Flag key can only contain lowercase letters, numbers, underscores, and hyphens"
+                .to_string(),
+        );
     }
-
     Ok(())
 }
 
-// Checks if percentage number is between the number 0 to 100
 pub fn validate_rollout_percentage(percentage: i32) -> Result<(), String> {
     if !(0..=100).contains(&percentage) {
-        return Err("Roolout percentage must be between 0 to 100".to_string());
+        return Err("Rollout percentage must be between 0 and 100".to_string());
     }
-
     Ok(())
 }
-
-
-
-
-// tests
 
 #[cfg(test)]
 mod tests {
@@ -97,12 +87,12 @@ mod tests {
         assert!(validate_flag_key("new_checkout").is_ok());
         assert!(validate_flag_key("dark-mode").is_ok());
         assert!(validate_flag_key("beta_features_2024").is_ok());
-        
+
         assert!(validate_flag_key("").is_err());
-        assert!(validate_flag_key("New_Checkout").is_err()); // uppercase
-        assert!(validate_flag_key("_invalid").is_err()); // starts with underscore
-        assert!(validate_flag_key("has space").is_err()); // space
-        assert!(validate_flag_key("has.dot").is_err()); // dot
+        assert!(validate_flag_key("New_Checkout").is_err()); // uppercase start
+        assert!(validate_flag_key("_invalid").is_err());     // starts with underscore
+        assert!(validate_flag_key("has space").is_err());
+        assert!(validate_flag_key("has.dot").is_err());
     }
 
     #[test]
@@ -110,7 +100,7 @@ mod tests {
         assert!(validate_rollout_percentage(0).is_ok());
         assert!(validate_rollout_percentage(50).is_ok());
         assert!(validate_rollout_percentage(100).is_ok());
-        
+
         assert!(validate_rollout_percentage(-1).is_err());
         assert!(validate_rollout_percentage(101).is_err());
     }

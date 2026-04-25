@@ -1,9 +1,11 @@
 use axum::{
-    extract::Request,
     middleware,
+    response::IntoResponse,
     routing::{get, post},
-    Router,
+    Json, Router,
 };
+use serde::Serialize;
+use uuid::Uuid;
 
 mod auth;
 mod health;
@@ -13,15 +15,13 @@ mod flags;
 mod rules;
 mod sdk_auth;
 mod sdk;
-pub mod environments; 
+pub mod environments;
 
-pub use auth::register;
-pub use health::health;
-
-use crate::routes::auth::login;
+use crate::routes::auth::{login, register};
+use crate::routes::middleware_auth::JwtUser;
 use crate::state::AppState;
 
-pub fn routes() -> Router<AppState> {
+pub fn routes(state: AppState) -> Router {
     let projects_router = Router::new()
         .route(
             "/",
@@ -33,12 +33,8 @@ pub fn routes() -> Router<AppState> {
                 .put(projects::routes::update)
                 .delete(projects::routes::delete),
         )
-        .route(
-            "/{id}/regenerate-key",
-            post(projects::routes::regenerate_key),
-        );
+        .route("/{id}/regenerate-key", post(projects::routes::regenerate_key));
 
-    // Rules router - handles /rules and /rules/{rule_id}
     let rules_router = Router::new()
         .route("/", post(rules::routes::create).get(rules::routes::list))
         .route(
@@ -48,7 +44,6 @@ pub fn routes() -> Router<AppState> {
                 .delete(rules::routes::delete),
         );
 
-    // Flags router - handles flags AND nests rules under /{flag_id}/rules
     let flags_router = Router::new()
         .route("/", post(flags::routes::create).get(flags::routes::list))
         .route(
@@ -60,7 +55,6 @@ pub fn routes() -> Router<AppState> {
         .route("/{flag_id}/toggle", post(flags::routes::toggle))
         .nest("/{flag_id}/rules", rules_router);
 
-    // Environments router - handles /environments and /environments/{environment_id}
     let environments_router = Router::new()
         .route(
             "/",
@@ -71,11 +65,11 @@ pub fn routes() -> Router<AppState> {
             get(environments::routes::get)
                 .put(environments::routes::update)
                 .delete(environments::routes::delete),
-        );  
+        );
 
     Router::new()
         .route("/", get(root))
-        .route("/health", get(health))
+        .route("/health", get(health::health))
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
         .nest(
@@ -84,25 +78,36 @@ pub fn routes() -> Router<AppState> {
                 .route("/me", get(me_handler))
                 .nest("/projects", projects_router)
                 .nest("/projects/{project_id}/environments", environments_router)
-                .nest("/projects/{project_id}/environments/{environment_id}/flags", flags_router)
-                .layer(middleware::from_fn(middleware_auth::require_auth)),
+                .nest(
+                    "/projects/{project_id}/environments/{environment_id}/flags",
+                    flags_router,
+                )
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    middleware_auth::require_auth,
+                )),
         )
         .nest(
             "/sdk/v1",
             Router::new()
                 .route("/evaluate", post(sdk::routes::evaluate))
-                .layer(middleware::from_fn(sdk_auth::require_sdk_key)),
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    sdk_auth::require_sdk_key,
+                )),
         )
+        .with_state(state)
 }
 
 async fn root() -> &'static str {
-    "Welcome to the API written in Rust"
+    "Feature Flag Service"
 }
 
-async fn me_handler(req: Request<axum::body::Body>) -> impl axum::response::IntoResponse {
-    let user_id = req.extensions().get::<uuid::Uuid>().cloned();
-    match user_id {
-        Some(u) => (axum::http::StatusCode::OK, format!("user_id: {}", u)),
-        None => (axum::http::StatusCode::UNAUTHORIZED, "no user".into()),
-    }
+#[derive(Serialize)]
+struct MeResponse {
+    user_id: Uuid,
+}
+
+async fn me_handler(JwtUser(user_id): JwtUser) -> impl IntoResponse {
+    Json(MeResponse { user_id })
 }

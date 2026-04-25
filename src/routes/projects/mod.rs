@@ -1,9 +1,9 @@
 pub mod routes;
 
+use rand::rngs::OsRng;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-// MODELS
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Project {
@@ -38,23 +38,15 @@ pub struct ProjectResponse {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// HELPER FUNCTIONS
-
-/// Generate a secure SDK key
-/// Format: "sdk_" + 32 random alphanumeric characters
+/// Generate a cryptographically secure SDK key using OsRng.
+/// Format: "sdk_" + 32 alphanumeric characters = 36 chars total.
 pub fn generate_sdk_key() -> String {
-    use rand::Rng;
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     const KEY_LENGTH: usize = 32;
-
-    let mut rng = rand::thread_rng();
+    let mut rng = OsRng;
     let key: String = (0..KEY_LENGTH)
-        .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
+        .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
         .collect();
-
     format!("sdk_{}", key)
 }
 
@@ -66,9 +58,8 @@ mod tests {
     fn test_generate_sdk_key() {
         let key1 = generate_sdk_key();
         let key2 = generate_sdk_key();
-
         assert!(key1.starts_with("sdk_"));
-        assert_eq!(key1.len(), 36); // "sdk_" (4) + 32 chars
-        assert_ne!(key1, key2); // Should be random
+        assert_eq!(key1.len(), 36);
+        assert_ne!(key1, key2);
     }
 }

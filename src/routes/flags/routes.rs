@@ -4,32 +4,44 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-
 use uuid::Uuid;
 
-use crate::routes::{flags::validate_flag_key, middleware_auth::JwtUser};
-use crate::state::AppState;
 use super::{
-    CreateFlagRequest, UpdateFlagRequest, FeatureFlag, FlagResponse,
-    validate_rollout_percentage
+    validate_flag_key, validate_rollout_percentage, CreateFlagRequest, FeatureFlag, FlagResponse,
+    UpdateFlagRequest,
 };
+use crate::routes::middleware_auth::JwtUser;
+use crate::state::AppState;
 
-/// Create a new feature flag within an environment
+const MAX_NAME_LEN: usize = 255;
+
+fn validate_name(name: &str) -> Result<(), (StatusCode, String)> {
+    let t = name.trim();
+    if t.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Name cannot be empty".to_string()));
+    }
+    if t.len() > MAX_NAME_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Name must be {} characters or fewer", MAX_NAME_LEN),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn create(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path((project_id, environment_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<CreateFlagRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Validate flag key
+    validate_name(&payload.name)?;
     validate_flag_key(&payload.key).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    // Validate rollout percentage if provided
     if let Some(percentage) = payload.rollout_percentage {
         validate_rollout_percentage(percentage).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     }
 
-    // Check if environment exists, belongs to the project, and user owns the project
     let environment_exists = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -45,7 +57,7 @@ pub async fn create(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check environment: {:?}", e);
+        tracing::error!("Failed to check environment: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -53,17 +65,18 @@ pub async fn create(
         return Err((StatusCode::NOT_FOUND, "Environment not found".to_string()));
     }
 
-    // Create the flag
     let flag = match sqlx::query_as::<_, FeatureFlag>(
         r#"
-        INSERT INTO feature_flags (project_id, environment_id, name, key, description, enabled, rollout_percentage)
+        INSERT INTO feature_flags
+            (project_id, environment_id, name, key, description, enabled, rollout_percentage)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, project_id, environment_id, name, key, description, enabled, rollout_percentage, created_at, updated_at
+        RETURNING id, project_id, environment_id, name, key, description, enabled,
+                  rollout_percentage, created_at, updated_at
         "#,
     )
     .bind(project_id)
     .bind(environment_id)
-    .bind(&payload.name)
+    .bind(payload.name.trim())
     .bind(&payload.key)
     .bind(&payload.description)
     .bind(payload.enabled.unwrap_or(false))
@@ -71,7 +84,7 @@ pub async fn create(
     .fetch_one(&state.db)
     .await
     {
-        Ok(flag) => flag,
+        Ok(f) => f,
         Err(e) => {
             if let Some(db_error) = e.as_database_error() {
                 if db_error.code() == Some(std::borrow::Cow::Borrowed("23505")) {
@@ -81,36 +94,19 @@ pub async fn create(
                     ));
                 }
             }
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", e),
-            ));
+            tracing::error!("Failed to create flag: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()));
         }
     };
 
-    let response = FlagResponse {
-        id: flag.id,
-        project_id: flag.project_id,
-        environment_id: flag.environment_id,
-        name: flag.name,
-        key: flag.key,
-        description: flag.description,
-        enabled: flag.enabled,
-        rollout_percentage: flag.rollout_percentage,
-        created_at: flag.created_at,
-        updated_at: flag.updated_at,
-    };
-
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((StatusCode::CREATED, Json(flag_to_response(flag))))
 }
 
-/// List all flags in an environment
 pub async fn list(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path((project_id, environment_id)): Path<(Uuid, Uuid)>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Check if environment exists and user owns the project
     let environment_exists = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -126,7 +122,7 @@ pub async fn list(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check environment: {:?}", e);
+        tracing::error!("Failed to check environment: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -136,7 +132,8 @@ pub async fn list(
 
     let flags = sqlx::query_as::<_, FeatureFlag>(
         r#"
-        SELECT id, project_id, environment_id, name, key, description, enabled, rollout_percentage, created_at, updated_at
+        SELECT id, project_id, environment_id, name, key, description, enabled,
+               rollout_percentage, created_at, updated_at
         FROM feature_flags
         WHERE environment_id = $1
         ORDER BY created_at DESC
@@ -146,30 +143,15 @@ pub async fn list(
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch flags: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch flags".to_string())
+        tracing::error!("Failed to fetch flags: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
-    let response: Vec<FlagResponse> = flags
-        .into_iter()
-        .map(|f| FlagResponse {
-            id: f.id,
-            project_id: f.project_id,
-            environment_id: f.environment_id,
-            name: f.name,
-            key: f.key,
-            description: f.description,
-            enabled: f.enabled,
-            rollout_percentage: f.rollout_percentage,
-            created_at: f.created_at,
-            updated_at: f.updated_at,
-        })
-        .collect();
-
-    Ok(Json(response))
+    Ok(Json(
+        flags.into_iter().map(flag_to_response).collect::<Vec<_>>(),
+    ))
 }
 
-/// Get a single flag by ID
 pub async fn get(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
@@ -177,7 +159,8 @@ pub async fn get(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let flag = sqlx::query_as::<_, FeatureFlag>(
         r#"
-        SELECT f.id, f.project_id, f.environment_id, f.name, f.key, f.description, f.enabled, f.rollout_percentage, f.created_at, f.updated_at
+        SELECT f.id, f.project_id, f.environment_id, f.name, f.key, f.description,
+               f.enabled, f.rollout_percentage, f.created_at, f.updated_at
         FROM feature_flags f
         JOIN environments e ON f.environment_id = e.id
         JOIN projects p ON e.project_id = p.id
@@ -191,43 +174,37 @@ pub async fn get(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to fetch flag: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch flag".to_string())
+        tracing::error!("Failed to fetch flag: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     match flag {
-        Some(f) => {
-            let response = FlagResponse {
-                id: f.id,
-                project_id: f.project_id,
-                environment_id: f.environment_id,
-                name: f.name,
-                key: f.key,
-                description: f.description,
-                enabled: f.enabled,
-                rollout_percentage: f.rollout_percentage,
-                created_at: f.created_at,
-                updated_at: f.updated_at,
-            };
-            Ok(Json(response))
-        }
+        Some(f) => Ok(Json(flag_to_response(f))),
         None => Err((StatusCode::NOT_FOUND, "Flag not found".to_string())),
     }
 }
 
-/// Update a feature flag
 pub async fn update(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
     Path((project_id, environment_id, flag_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(payload): Json<UpdateFlagRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Validate rollout percentage if provided
+    if payload.name.is_none()
+        && payload.description.is_none()
+        && payload.enabled.is_none()
+        && payload.rollout_percentage.is_none()
+    {
+        return Err((StatusCode::BAD_REQUEST, "No fields to update".to_string()));
+    }
+
+    if let Some(ref name) = payload.name {
+        validate_name(name)?;
+    }
     if let Some(percentage) = payload.rollout_percentage {
         validate_rollout_percentage(percentage).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     }
 
-    // Check if flag exists and user owns the project
     let exists = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -245,7 +222,7 @@ pub async fn update(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to check flag: {:?}", e);
+        tracing::error!("Failed to check flag: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
@@ -257,44 +234,31 @@ pub async fn update(
         r#"
         UPDATE feature_flags
         SET
-            name = COALESCE($2, name),
-            description = COALESCE($3, description),
-            enabled = COALESCE($4, enabled),
+            name               = COALESCE($2, name),
+            description        = COALESCE($3, description),
+            enabled            = COALESCE($4, enabled),
             rollout_percentage = COALESCE($5, rollout_percentage),
-            updated_at = NOW()
+            updated_at         = NOW()
         WHERE id = $1
-        RETURNING id, project_id, environment_id, name, key, description, enabled, rollout_percentage, created_at, updated_at
+        RETURNING id, project_id, environment_id, name, key, description, enabled,
+                  rollout_percentage, created_at, updated_at
         "#,
     )
     .bind(flag_id)
-    .bind(payload.name.as_deref())
+    .bind(payload.name.as_deref().map(str::trim))
     .bind(payload.description.as_deref())
     .bind(payload.enabled)
     .bind(payload.rollout_percentage)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to update flag: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update flag".to_string())
+        tracing::error!("Failed to update flag: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
-    let response = FlagResponse {
-        id: flag.id,
-        project_id: flag.project_id,
-        environment_id: flag.environment_id,
-        name: flag.name,
-        key: flag.key,
-        description: flag.description,
-        enabled: flag.enabled,
-        rollout_percentage: flag.rollout_percentage,
-        created_at: flag.created_at,
-        updated_at: flag.updated_at,
-    };
-
-    Ok(Json(response))
+    Ok(Json(flag_to_response(flag)))
 }
 
-/// Delete a feature flag
 pub async fn delete(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
@@ -305,8 +269,8 @@ pub async fn delete(
         DELETE FROM feature_flags f
         USING environments e, projects p
         WHERE f.id = $1 AND f.environment_id = $2
-        AND e.id = f.environment_id AND e.project_id = $3
-        AND p.id = e.project_id AND p.created_by = $4
+          AND e.id = f.environment_id AND e.project_id = $3
+          AND p.id = e.project_id AND p.created_by = $4
         "#,
     )
     .bind(flag_id)
@@ -316,8 +280,8 @@ pub async fn delete(
     .execute(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to delete flag: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete flag".to_string())
+        tracing::error!("Failed to delete flag: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     if result.rows_affected() == 0 {
@@ -327,7 +291,6 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Toggle a flag's enabled state
 pub async fn toggle(
     State(state): State<AppState>,
     JwtUser(user_id): JwtUser,
@@ -339,9 +302,10 @@ pub async fn toggle(
         SET enabled = NOT f.enabled, updated_at = NOW()
         FROM environments e, projects p
         WHERE f.id = $1 AND f.environment_id = $2
-        AND e.id = f.environment_id AND e.project_id = $3
-        AND p.id = e.project_id AND p.created_by = $4
-        RETURNING f.id, f.project_id, f.environment_id, f.name, f.key, f.description, f.enabled, f.rollout_percentage, f.created_at, f.updated_at
+          AND e.id = f.environment_id AND e.project_id = $3
+          AND p.id = e.project_id AND p.created_by = $4
+        RETURNING f.id, f.project_id, f.environment_id, f.name, f.key, f.description,
+                  f.enabled, f.rollout_percentage, f.created_at, f.updated_at
         "#,
     )
     .bind(flag_id)
@@ -351,26 +315,27 @@ pub async fn toggle(
     .fetch_optional(&state.db)
     .await
     .map_err(|e| {
-        eprintln!("Failed to toggle flag: {:?}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to toggle flag".to_string())
+        tracing::error!("Failed to toggle flag: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
     })?;
 
     match flag {
-        Some(f) => {
-            let response = FlagResponse {
-                id: f.id,
-                project_id: f.project_id,
-                environment_id: f.environment_id,
-                name: f.name,
-                key: f.key,
-                description: f.description,
-                enabled: f.enabled,
-                rollout_percentage: f.rollout_percentage,
-                created_at: f.created_at,
-                updated_at: f.updated_at,
-            };
-            Ok(Json(response))
-        }
+        Some(f) => Ok(Json(flag_to_response(f))),
         None => Err((StatusCode::NOT_FOUND, "Flag not found".to_string())),
+    }
+}
+
+fn flag_to_response(f: FeatureFlag) -> FlagResponse {
+    FlagResponse {
+        id: f.id,
+        project_id: f.project_id,
+        environment_id: f.environment_id,
+        name: f.name,
+        key: f.key,
+        description: f.description,
+        enabled: f.enabled,
+        rollout_percentage: f.rollout_percentage,
+        created_at: f.created_at,
+        updated_at: f.updated_at,
     }
 }

@@ -9,10 +9,12 @@ tokio = { version = "1.48.0", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 dotenvy = "0.15.7"
-sqlx = {version = "0.8.6", features = ["postgres", "macros", "runtime-tokio", "uuid", "migrate", "chrono"] }
-uuid = { version = "1.18.1", features = ["serde","v4"] }
+sqlx = { version = "0.8.6", features = ["postgres", "macros", "runtime-tokio", "uuid", "migrate", "chrono"] }
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5.3"
 rand = "0.8.5"
 jsonwebtoken = "9"
-tower-http ={ version = "0.5", features = ["cors"]}
+tower-http = { version = "0.5", features = ["cors", "timeout"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

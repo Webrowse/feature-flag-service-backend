@@ -1,14 +1,15 @@
 use axum::{
-    extract::{FromRequestParts, Request},
+    extract::{FromRequestParts, Request, State},
     http::request::Parts,
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
-use std::env;
 use uuid::Uuid;
+
+use crate::state::AppState;
 
 pub struct JwtUser(pub Uuid);
 
@@ -29,14 +30,19 @@ where
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct Claims {
     sub: String,
+    #[allow(dead_code)]
     exp: usize,
+    #[allow(dead_code)]
     iat: usize,
 }
 
-pub async fn require_auth(mut req: Request, next: Next) -> Result<Response, impl IntoResponse> {
+pub async fn require_auth(
+    State(state): State<AppState>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, impl IntoResponse> {
     let auth_header = req
         .headers()
         .get("authorization")
@@ -44,21 +50,20 @@ pub async fn require_auth(mut req: Request, next: Next) -> Result<Response, impl
 
     let token = match auth_header {
         Some(h) if h.starts_with("Bearer ") => &h[7..],
-        _ => {
-            return Err((StatusCode::UNAUTHORIZED, "missing token"));
-        }
+        _ => return Err((StatusCode::UNAUTHORIZED, "missing token")),
     };
 
-    let secret = env::var("JWT_SECRET").expect("JWT is not found");
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
 
     let token_data = match decode::<Claims>(
         token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+        &validation,
     ) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("JWT decode error: {}", e);
+            tracing::warn!("JWT validation failed: {}", e);
             return Err((StatusCode::UNAUTHORIZED, "invalid token"));
         }
     };
@@ -68,6 +73,6 @@ pub async fn require_auth(mut req: Request, next: Next) -> Result<Response, impl
             req.extensions_mut().insert(user_id);
             Ok(next.run(req).await)
         }
-        Err(_) => Err((StatusCode::UNAUTHORIZED, "invalid subject")),
+        Err(_) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
     }
 }

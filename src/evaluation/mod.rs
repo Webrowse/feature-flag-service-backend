@@ -1,25 +1,20 @@
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
-// User context for evaluation
 #[derive(Debug, Deserialize, Clone)]
 pub struct UserContext {
     pub user_id: Option<String>,
     pub user_email: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // Reserved for future attribute-based targeting rules
+    #[allow(dead_code)]
     pub custom_attributes: std::collections::HashMap<String, String>,
 }
 
-// Flag evaluation result
 #[derive(Debug, Serialize)]
 pub struct FlagEvaluation {
     pub enabled: bool,
     pub reason: String,
 }
 
-// Flag data needed for evaluation
 #[derive(Debug, Clone)]
 pub struct FlagData {
     pub key: String,
@@ -27,7 +22,6 @@ pub struct FlagData {
     pub rollout_percentage: i32,
 }
 
-// Rule data for evaluation
 #[derive(Debug, Clone)]
 pub struct RuleData {
     pub rule_type: String,
@@ -36,13 +30,11 @@ pub struct RuleData {
     pub priority: i32,
 }
 
-/// Evaluate if a flag should be enabled for a given user
 pub fn evaluate_flag(
     flag: &FlagData,
     rules: &[RuleData],
     context: &UserContext,
 ) -> FlagEvaluation {
-    // Step 1: If flag is globally disabled, return false
     if !flag.enabled {
         return FlagEvaluation {
             enabled: false,
@@ -50,96 +42,87 @@ pub fn evaluate_flag(
         };
     }
 
-    // Step 2: Sort rules by priority (highest first) and check them
+    // Sort rules by priority DESC so unit tests work without pre-sorted input.
+    // (The SDK query also sorts, so this is cheap on already-sorted slices.)
     let mut sorted_rules = rules.to_vec();
     sorted_rules.sort_by(|a, b| b.priority.cmp(&a.priority));
 
-    for rule in sorted_rules.iter() {
+    for rule in &sorted_rules {
         if !rule.enabled {
-            continue; // Skip disabled rules
+            continue;
         }
 
-        match rule.rule_type.as_str() {
-            "user_id" => {
-                if let Some(ref user_id) = context.user_id {
-                    if user_id == &rule.rule_value {
-                        return FlagEvaluation {
-                            enabled: true,
-                            reason: format!("Matched user_id rule: {}", rule.rule_value),
-                        };
-                    }
-                }
-            }
-            "user_email" => {
-                if let Some(ref email) = context.user_email {
-                    if email == &rule.rule_value {
-                        return FlagEvaluation {
-                            enabled: true,
-                            reason: format!("Matched user_email rule: {}", rule.rule_value),
-                        };
-                    }
-                }
-            }
-            "email_domain" => {
-                if let Some(ref email) = context.user_email {
-                    if email.ends_with(&rule.rule_value) {
-                        return FlagEvaluation {
-                            enabled: true,
-                            reason: format!("Matched email_domain rule: {}", rule.rule_value),
-                        };
-                    }
-                }
-            }
-            _ => {} // Unknown rule type, skip
-        }
-    }
+        let matched = match rule.rule_type.as_str() {
+            "user_id" => context
+                .user_id
+                .as_deref()
+                .map_or(false, |id| id == rule.rule_value),
+            "user_email" => context
+                .user_email
+                .as_deref()
+                .map_or(false, |email| email == rule.rule_value),
+            "email_domain" => context.user_email.as_deref().map_or(false, |email| {
+                // rule_value starts with '@' (enforced by validation + DB CHECK).
+                email.ends_with(rule.rule_value.as_str())
+            }),
+            _ => false,
+        };
 
-    // Step 3: Check percentage rollout using consistent hashing
-    if flag.rollout_percentage > 0 {
-        let user_identifier = context.user_id.as_ref()
-            .or(context.user_email.as_ref())
-            .map(|s| s.as_str())
-            .unwrap_or("anonymous");
-
-        if should_enable_for_percentage(&flag.key, user_identifier, flag.rollout_percentage) {
+        if matched {
             return FlagEvaluation {
                 enabled: true,
-                reason: format!("User in {}% rollout", flag.rollout_percentage),
-            };
-        } else {
-            return FlagEvaluation {
-                enabled: false,
-                reason: format!("User not in {}% rollout", flag.rollout_percentage),
+                // Never echo back rule_value — it would disclose targeting lists to SDK callers.
+                reason: format!("Matched {} targeting rule", rule.rule_type),
             };
         }
     }
 
-    // Step 4: Default - flag is enabled globally but no rules matched and no rollout
+    if flag.rollout_percentage > 0 {
+        let user_identifier = context
+            .user_id
+            .as_deref()
+            .or(context.user_email.as_deref())
+            .unwrap_or("anonymous");
+
+        return if should_enable_for_percentage(&flag.key, user_identifier, flag.rollout_percentage)
+        {
+            FlagEvaluation {
+                enabled: true,
+                reason: format!("User in {}% rollout", flag.rollout_percentage),
+            }
+        } else {
+            FlagEvaluation {
+                enabled: false,
+                reason: format!("User not in {}% rollout", flag.rollout_percentage),
+            }
+        };
+    }
+
     FlagEvaluation {
         enabled: true,
-        reason: "Flag enabled globally, no specific rules applied".to_string(),
+        reason: "Flag enabled globally".to_string(),
     }
 }
 
-/// Consistent hashing for percentage rollout
-/// Ensures the same user always gets the same result for a given percentage
+/// FNV-1a hash — deterministic and stable across Rust versions and process restarts,
+/// unlike `DefaultHasher` which must never be used for business-logic bucketing.
+fn fnv1a(s: &str) -> u64 {
+    const OFFSET: u64 = 14695981039346656037;
+    const PRIME: u64 = 1099511628211;
+    s.bytes().fold(OFFSET, |hash, byte| {
+        hash.wrapping_mul(PRIME) ^ (byte as u64)
+    })
+}
+
 fn should_enable_for_percentage(flag_key: &str, user_identifier: &str, percentage: i32) -> bool {
-    if percentage == 0 {
+    if percentage <= 0 {
         return false;
     }
     if percentage >= 100 {
         return true;
     }
-
-    // Create a consistent hash from flag_key + user_identifier
-    let mut hasher = DefaultHasher::new();
-    format!("{}:{}", flag_key, user_identifier).hash(&mut hasher);
-    let hash = hasher.finish();
-
-    // Map hash to 0-99 range
-    let bucket = (hash % 100) as i32;
-
-    // User is in the rollout if their bucket is less than the percentage
+    let key = format!("{}:{}", flag_key, user_identifier);
+    let bucket = (fnv1a(&key) % 100) as i32;
     bucket < percentage
 }
 
@@ -147,118 +130,161 @@ fn should_enable_for_percentage(flag_key: &str, user_identifier: &str, percentag
 mod tests {
     use super::*;
 
+    fn ctx(user_id: Option<&str>, email: Option<&str>) -> UserContext {
+        UserContext {
+            user_id: user_id.map(str::to_string),
+            user_email: email.map(str::to_string),
+            custom_attributes: Default::default(),
+        }
+    }
+
+    fn enabled_flag(key: &str, rollout: i32) -> FlagData {
+        FlagData {
+            key: key.to_string(),
+            enabled: true,
+            rollout_percentage: rollout,
+        }
+    }
+
     #[test]
     fn test_globally_disabled_flag() {
         let flag = FlagData {
-            key: "test_flag".to_string(),
+            key: "test".to_string(),
             enabled: false,
             rollout_percentage: 100,
         };
-        let rules = vec![];
-        let context = UserContext {
-            user_id: Some("user123".to_string()),
-            user_email: None,
-            custom_attributes: Default::default(),
-        };
-
-        let result = evaluate_flag(&flag, &rules, &context);
+        let result = evaluate_flag(&flag, &[], &ctx(Some("u1"), None));
         assert!(!result.enabled);
         assert!(result.reason.contains("globally disabled"));
     }
 
     #[test]
     fn test_user_id_rule_match() {
-        let flag = FlagData {
-            key: "test_flag".to_string(),
-            enabled: true,
-            rollout_percentage: 0,
-        };
         let rules = vec![RuleData {
             rule_type: "user_id".to_string(),
             rule_value: "user123".to_string(),
             enabled: true,
             priority: 10,
         }];
-        let context = UserContext {
-            user_id: Some("user123".to_string()),
-            user_email: None,
-            custom_attributes: Default::default(),
-        };
-
-        let result = evaluate_flag(&flag, &rules, &context);
+        let result = evaluate_flag(&enabled_flag("f", 0), &rules, &ctx(Some("user123"), None));
         assert!(result.enabled);
         assert!(result.reason.contains("user_id"));
+        // Must not leak the value itself.
+        assert!(!result.reason.contains("user123"));
+    }
+
+    #[test]
+    fn test_user_email_rule_match() {
+        let rules = vec![RuleData {
+            rule_type: "user_email".to_string(),
+            rule_value: "alice@example.com".to_string(),
+            enabled: true,
+            priority: 5,
+        }];
+        let result = evaluate_flag(
+            &enabled_flag("f", 0),
+            &rules,
+            &ctx(None, Some("alice@example.com")),
+        );
+        assert!(result.enabled);
+        assert!(result.reason.contains("user_email"));
+        assert!(!result.reason.contains("alice@example.com"));
     }
 
     #[test]
     fn test_email_domain_match() {
-        let flag = FlagData {
-            key: "test_flag".to_string(),
-            enabled: true,
-            rollout_percentage: 0,
-        };
         let rules = vec![RuleData {
             rule_type: "email_domain".to_string(),
             rule_value: "@company.com".to_string(),
             enabled: true,
             priority: 5,
         }];
-        let context = UserContext {
-            user_id: None,
-            user_email: Some("john@company.com".to_string()),
-            custom_attributes: Default::default(),
-        };
-
-        let result = evaluate_flag(&flag, &rules, &context);
+        let result = evaluate_flag(
+            &enabled_flag("f", 0),
+            &rules,
+            &ctx(None, Some("john@company.com")),
+        );
         assert!(result.enabled);
-        assert!(result.reason.contains("email_domain"));
+        assert!(!result.reason.contains("@company.com"));
     }
 
     #[test]
-    fn test_consistent_hashing() {
-        // Same user should always get same result
-        let result1 = should_enable_for_percentage("test_flag", "user123", 50);
-        let result2 = should_enable_for_percentage("test_flag", "user123", 50);
-        assert_eq!(result1, result2);
-
-        // 0% should always be false
-        assert!(!should_enable_for_percentage("test_flag", "user123", 0));
-
-        // 100% should always be true
-        assert!(should_enable_for_percentage("test_flag", "user123", 100));
-    }
-
-    #[test]
-    fn test_rule_priority() {
-        let flag = FlagData {
-            key: "test_flag".to_string(),
+    fn test_email_domain_no_false_positive() {
+        let rules = vec![RuleData {
+            rule_type: "email_domain".to_string(),
+            rule_value: "@company.com".to_string(),
             enabled: true,
-            rollout_percentage: 0,
-        };
-        // Higher priority rule should be evaluated first
+            priority: 5,
+        }];
+        // "attacker@notcompany.com" must NOT match the "@company.com" domain rule.
+        // The flag is globally enabled, so it's still true — but the reason must not
+        // say "email_domain" (that would mean the rule incorrectly matched).
+        let result = evaluate_flag(
+            &enabled_flag("f", 0),
+            &rules,
+            &ctx(None, Some("attacker@notcompany.com")),
+        );
+        assert!(result.enabled); // flag is globally enabled regardless
+        assert!(!result.reason.contains("email_domain")); // rule must NOT have fired
+    }
+
+    #[test]
+    fn test_disabled_rule_skipped() {
+        let rules = vec![RuleData {
+            rule_type: "user_id".to_string(),
+            rule_value: "user123".to_string(),
+            enabled: false, // disabled — must be skipped
+            priority: 10,
+        }];
+        let result = evaluate_flag(&enabled_flag("f", 0), &rules, &ctx(Some("user123"), None));
+        // Falls through to globally-enabled default; must not claim the rule matched.
+        assert!(result.enabled);
+        assert!(!result.reason.contains("user_id"));
+        assert!(result.reason.contains("globally"));
+    }
+
+    #[test]
+    fn test_consistent_hashing_stable() {
+        // Same inputs must always yield the same result.
+        let r1 = should_enable_for_percentage("flag", "user123", 50);
+        let r2 = should_enable_for_percentage("flag", "user123", 50);
+        assert_eq!(r1, r2);
+
+        assert!(!should_enable_for_percentage("flag", "user123", 0));
+        assert!(should_enable_for_percentage("flag", "user123", 100));
+    }
+
+    #[test]
+    fn test_anonymous_user_percentage() {
+        // Anonymous users (no id/email) get a consistent bucket.
+        let r1 = should_enable_for_percentage("flag", "anonymous", 50);
+        let r2 = should_enable_for_percentage("flag", "anonymous", 50);
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_rule_priority_order() {
         let rules = vec![
-            RuleData {
-                rule_type: "user_id".to_string(),
-                rule_value: "user123".to_string(),
-                enabled: true,
-                priority: 10,
-            },
             RuleData {
                 rule_type: "email_domain".to_string(),
                 rule_value: "@company.com".to_string(),
                 enabled: true,
                 priority: 5,
             },
+            RuleData {
+                rule_type: "user_id".to_string(),
+                rule_value: "user123".to_string(),
+                enabled: true,
+                priority: 10,
+            },
         ];
-        let context = UserContext {
-            user_id: Some("user123".to_string()),
-            user_email: Some("john@company.com".to_string()),
-            custom_attributes: Default::default(),
-        };
-
-        let result = evaluate_flag(&flag, &rules, &context);
+        // user_id rule has higher priority and matches; that reason should be returned.
+        let result = evaluate_flag(
+            &enabled_flag("f", 0),
+            &rules,
+            &ctx(Some("user123"), Some("john@company.com")),
+        );
         assert!(result.enabled);
-        // Should match the higher priority user_id rule
         assert!(result.reason.contains("user_id"));
     }
 }
