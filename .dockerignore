@@ -1,0 +1,25 @@
+# Compiled output — Mac binaries are wrong arch for the Linux container,
+# and sending gigabytes of build artifacts breaks layer caching.
+target/
+
+# Secrets — never bake these into an image
+.env
+.env.*
+!.env.example
+
+# Git history not needed at runtime
+.git/
+.gitignore
+
+# Local dev / editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test scripts (not needed in production image)
+test_*.sh
+
+# Docker build itself
+Dockerfile
+.dockerignore
