@@ -28,8 +28,5 @@ Thumbs.db
 # SQLX
 .sqlx/
 
-# Bash testing scripts
-test_project.sh
-test_flags.sh
-test_rules.sh
-test_evaluation.sh
+# Integration test scripts
+test_*.sh
