@@ -22,11 +22,10 @@ async fn main() {
 
     let db = PgPoolOptions::new()
         .max_connections(20)
-        .acquire_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(600))
-        .connect(&config.database_url)
-        .await
-        .expect("Failed to connect to database");
+        .connect_lazy(&config.database_url)
+        .expect("Invalid DATABASE_URL");
 
     let allowed_origin: HeaderValue = config
         .allowed_origin
