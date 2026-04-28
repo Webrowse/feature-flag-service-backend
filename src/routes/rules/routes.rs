@@ -41,7 +41,10 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !flag_exists {
@@ -64,7 +67,10 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::error!("Failed to create rule: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok((StatusCode::CREATED, Json(rule_to_response(rule))))
@@ -93,7 +99,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !flag_exists {
@@ -113,7 +122,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch rules: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok(Json(
@@ -146,7 +158,10 @@ pub async fn get(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch rule: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match rule {
@@ -186,7 +201,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch rule for update: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     let existing = match existing {
@@ -218,7 +236,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to update rule: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok(Json(rule_to_response(updated)))
@@ -251,7 +272,10 @@ pub async fn delete(
     .await
     .map_err(|e| {
         tracing::error!("Failed to delete rule: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if result.rows_affected() == 0 {

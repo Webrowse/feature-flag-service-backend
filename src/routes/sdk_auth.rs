@@ -49,16 +49,15 @@ pub async fn require_sdk_key(
         return Err((StatusCode::UNAUTHORIZED, "Invalid SDK key"));
     }
 
-    let project = sqlx::query_as::<_, (uuid::Uuid,)>(
-        r#"SELECT id FROM projects WHERE sdk_key = $1"#,
-    )
-    .bind(&sdk_key)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("DB error validating SDK key: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-    })?;
+    let project =
+        sqlx::query_as::<_, (uuid::Uuid,)>(r#"SELECT id FROM projects WHERE sdk_key = $1"#)
+            .bind(&sdk_key)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("DB error validating SDK key: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            })?;
 
     match project {
         Some((project_id,)) => {

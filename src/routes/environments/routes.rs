@@ -47,7 +47,10 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !project_exists {
@@ -79,7 +82,10 @@ pub async fn create(
                 }
             }
             tracing::error!("Failed to create environment: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            ));
         }
     };
 
@@ -111,7 +117,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !project_exists {
@@ -131,7 +140,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch environments: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     let response: Vec<EnvironmentResponse> = environments
@@ -170,7 +182,10 @@ pub async fn get(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match environment {
@@ -217,7 +232,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !exists {
@@ -242,7 +260,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to update environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok(Json(EnvironmentResponse {
@@ -275,7 +296,10 @@ pub async fn delete(
     .await
     .map_err(|e| {
         tracing::error!("Failed to delete environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if result.rows_affected() == 0 {

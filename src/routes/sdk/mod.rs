@@ -8,7 +8,7 @@ pub use crate::evaluation::UserContext;
 
 #[derive(Debug, Deserialize)]
 pub struct EvaluateRequest {
-    pub environment: String,  // Environment key (e.g., "production", "staging")
+    pub environment: String, // Environment key (e.g., "production", "staging")
     pub context: UserContext,
 }
 

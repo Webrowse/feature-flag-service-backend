@@ -30,11 +30,7 @@ pub struct RuleData {
     pub priority: i32,
 }
 
-pub fn evaluate_flag(
-    flag: &FlagData,
-    rules: &[RuleData],
-    context: &UserContext,
-) -> FlagEvaluation {
+pub fn evaluate_flag(flag: &FlagData, rules: &[RuleData], context: &UserContext) -> FlagEvaluation {
     if !flag.enabled {
         return FlagEvaluation {
             enabled: false,

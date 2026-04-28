@@ -74,7 +74,7 @@ mod tests {
 
         assert!(validate_environment_key("").is_err());
         assert!(validate_environment_key("Production").is_err()); // uppercase start
-        assert!(validate_environment_key("_invalid").is_err());   // starts with underscore
+        assert!(validate_environment_key("_invalid").is_err()); // starts with underscore
         assert!(validate_environment_key("has space").is_err());
         assert!(validate_environment_key("has.dot").is_err());
     }

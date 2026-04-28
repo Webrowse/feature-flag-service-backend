@@ -8,14 +8,14 @@ use serde::Serialize;
 use uuid::Uuid;
 
 mod auth;
+pub mod environments;
+mod flags;
 mod health;
 mod middleware_auth;
 mod projects;
-mod flags;
 mod rules;
-mod sdk_auth;
 mod sdk;
-pub mod environments;
+mod sdk_auth;
 
 use crate::routes::auth::{login, register};
 use crate::routes::middleware_auth::JwtUser;
@@ -33,7 +33,10 @@ pub fn routes(state: AppState) -> Router {
                 .put(projects::routes::update)
                 .delete(projects::routes::delete),
         )
-        .route("/{id}/regenerate-key", post(projects::routes::regenerate_key));
+        .route(
+            "/{id}/regenerate-key",
+            post(projects::routes::regenerate_key),
+        );
 
     let rules_router = Router::new()
         .route("/", post(rules::routes::create).get(rules::routes::list))

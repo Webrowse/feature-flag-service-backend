@@ -2,10 +2,10 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use super::{EvaluateRequest, EvaluateResponse, FlagState};
 use crate::evaluation::{evaluate_flag, FlagData, RuleData};
 use crate::routes::sdk_auth::SdkProject;
 use crate::state::AppState;
-use super::{EvaluateRequest, EvaluateResponse, FlagState};
 
 #[derive(Debug, sqlx::FromRow)]
 struct EnvironmentRow {
@@ -37,22 +37,27 @@ pub async fn evaluate(
     let environment_key = request.environment.trim().to_string();
 
     if environment_key.is_empty() || environment_key.len() > 64 {
-        return Err((StatusCode::BAD_REQUEST, "Invalid environment key".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid environment key".to_string(),
+        ));
     }
 
     let context = request.context;
 
-    let environment: Option<EnvironmentRow> = sqlx::query_as(
-        r#"SELECT id FROM environments WHERE project_id = $1 AND key = $2"#,
-    )
-    .bind(project_id)
-    .bind(&environment_key)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?;
+    let environment: Option<EnvironmentRow> =
+        sqlx::query_as(r#"SELECT id FROM environments WHERE project_id = $1 AND key = $2"#)
+            .bind(project_id)
+            .bind(&environment_key)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch environment: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
     let environment_id = match environment {
         Some(env) => env.id,
@@ -96,7 +101,10 @@ pub async fn evaluate(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch rules: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     let mut rules_by_flag: HashMap<Uuid, Vec<RuleData>> = HashMap::new();
@@ -171,5 +179,7 @@ pub async fn evaluate(
         }
     });
 
-    Ok(Json(EvaluateResponse { flags: result_flags }))
+    Ok(Json(EvaluateResponse {
+        flags: result_flags,
+    }))
 }

@@ -30,7 +30,11 @@ async fn main() {
     let allowed_origins: Vec<HeaderValue> = config
         .allowed_origin
         .split(',')
-        .map(|o| o.trim().parse().expect("ALLOWED_ORIGIN contains invalid value"))
+        .map(|o| {
+            o.trim()
+                .parse()
+                .expect("ALLOWED_ORIGIN contains invalid value")
+        })
         .collect();
 
     let cors = CorsLayer::new()

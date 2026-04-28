@@ -90,7 +90,7 @@ mod tests {
 
         assert!(validate_flag_key("").is_err());
         assert!(validate_flag_key("New_Checkout").is_err()); // uppercase start
-        assert!(validate_flag_key("_invalid").is_err());     // starts with underscore
+        assert!(validate_flag_key("_invalid").is_err()); // starts with underscore
         assert!(validate_flag_key("has space").is_err());
         assert!(validate_flag_key("has.dot").is_err());
     }

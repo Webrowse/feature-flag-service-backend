@@ -12,10 +12,8 @@ use super::{
 use crate::routes::middleware_auth::JwtUser;
 use crate::state::AppState;
 
-const DEFAULT_ENVIRONMENTS: &[(&str, &str)] = &[
-    ("production", "Production"),
-    ("staging", "Staging"),
-];
+const DEFAULT_ENVIRONMENTS: &[(&str, &str)] =
+    &[("production", "Production"), ("staging", "Staging")];
 
 const MAX_NAME_LEN: usize = 255;
 
@@ -44,7 +42,10 @@ pub async fn create(
 
     let mut tx = state.db.begin().await.map_err(|e| {
         tracing::error!("Failed to start transaction: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     let project = sqlx::query_as::<_, Project>(
@@ -62,7 +63,10 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::error!("Failed to create project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     for (env_key, env_name) in DEFAULT_ENVIRONMENTS {
@@ -80,13 +84,19 @@ pub async fn create(
         .await
         .map_err(|e| {
             tracing::error!("Failed to create default environment '{}': {}", env_key, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
         })?;
     }
 
     tx.commit().await.map_err(|e| {
         tracing::error!("Failed to commit transaction: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok((
@@ -114,7 +124,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch projects: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     let response: Vec<ProjectResponse> = projects
@@ -137,17 +150,19 @@ pub async fn get(
     JwtUser(user_id): JwtUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let project = sqlx::query_as::<_, Project>(
-        r#"SELECT * FROM projects WHERE id = $1 AND created_by = $2"#,
-    )
-    .bind(project_id)
-    .bind(user_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?;
+    let project =
+        sqlx::query_as::<_, Project>(r#"SELECT * FROM projects WHERE id = $1 AND created_by = $2"#)
+            .bind(project_id)
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch project: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
     match project {
         Some(p) => Ok(Json(ProjectResponse {
@@ -169,10 +184,7 @@ pub async fn update(
     Json(payload): Json<UpdateProjectRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     if payload.name.is_none() && payload.description.is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "No fields to update".to_string(),
-        ));
+        return Err((StatusCode::BAD_REQUEST, "No fields to update".to_string()));
     }
 
     if let Some(ref name) = payload.name {
@@ -198,7 +210,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to update project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match project {
@@ -219,17 +234,18 @@ pub async fn delete(
     JwtUser(user_id): JwtUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let result = sqlx::query(
-        r#"DELETE FROM projects WHERE id = $1 AND created_by = $2"#,
-    )
-    .bind(project_id)
-    .bind(user_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to delete project: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
-    })?;
+    let result = sqlx::query(r#"DELETE FROM projects WHERE id = $1 AND created_by = $2"#)
+        .bind(project_id)
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to delete project: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
 
     if result.rows_affected() == 0 {
         return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
@@ -260,7 +276,10 @@ pub async fn regenerate_key(
     .await
     .map_err(|e| {
         tracing::error!("Failed to regenerate SDK key: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match project {

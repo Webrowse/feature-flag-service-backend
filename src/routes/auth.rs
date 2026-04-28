@@ -63,7 +63,11 @@ pub async fn register(
     }
 
     if payload.password.len() < 8 {
-        return (StatusCode::BAD_REQUEST, "Password must be at least 8 characters").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Password must be at least 8 characters",
+        )
+            .into_response();
     }
 
     if payload.password.len() > MAX_PASSWORD_LEN {
@@ -83,22 +87,17 @@ pub async fn register(
 
     let user_id = Uuid::new_v4();
 
-    let res = sqlx::query(
-        r#"INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)"#,
-    )
-    .bind(user_id)
-    .bind(&email)
-    .bind(&password_hash)
-    .execute(&state.db)
-    .await;
+    let res = sqlx::query(r#"INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)"#)
+        .bind(user_id)
+        .bind(&email)
+        .bind(&password_hash)
+        .execute(&state.db)
+        .await;
 
     match res {
         Ok(_) => (
             StatusCode::CREATED,
-            Json(RegisterResponse {
-                id: user_id,
-                email,
-            }),
+            Json(RegisterResponse { id: user_id, email }),
         )
             .into_response(),
         Err(e) => {

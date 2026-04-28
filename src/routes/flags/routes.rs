@@ -58,7 +58,10 @@ pub async fn create(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !environment_exists {
@@ -95,7 +98,10 @@ pub async fn create(
                 }
             }
             tracing::error!("Failed to create flag: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string()));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            ));
         }
     };
 
@@ -123,7 +129,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check environment: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !environment_exists {
@@ -144,7 +153,10 @@ pub async fn list(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch flags: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok(Json(
@@ -175,7 +187,10 @@ pub async fn get(
     .await
     .map_err(|e| {
         tracing::error!("Failed to fetch flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match flag {
@@ -223,7 +238,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to check flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if !exists {
@@ -253,7 +271,10 @@ pub async fn update(
     .await
     .map_err(|e| {
         tracing::error!("Failed to update flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     Ok(Json(flag_to_response(flag)))
@@ -281,7 +302,10 @@ pub async fn delete(
     .await
     .map_err(|e| {
         tracing::error!("Failed to delete flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     if result.rows_affected() == 0 {
@@ -316,7 +340,10 @@ pub async fn toggle(
     .await
     .map_err(|e| {
         tracing::error!("Failed to toggle flag: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database error".to_string(),
+        )
     })?;
 
     match flag {
