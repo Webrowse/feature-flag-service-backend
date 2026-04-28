@@ -399,6 +399,10 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 MIT. See LICENSE file.
 
+## Related
+
+- **Frontend**: [feature-flag-service-frontend](https://github.com/Webrowse/feature-flag-service-frontend)
+
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/Webrowse/feature-flag-service-backend/issues)
