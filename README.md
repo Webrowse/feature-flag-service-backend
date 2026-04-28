@@ -3,24 +3,25 @@
 > A production-ready feature flag management service built with Rust, Axum, and PostgreSQL
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/rust-1.82%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/Webrowse/feature-flag-service-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/Webrowse/feature-flag-service-backend/actions/workflows/ci.yml)
 
-**[📖 Complete API Documentation →](./API.md)** | **[🧪 Postman Collection →](./postman_collection.json)**
+**[Complete API Documentation](./API.md)** | **[Postman Collection](./postman_collection.json)**
 
 ## What Is This?
 
-A complete, self-hosted feature flag service that lets you control feature rollouts, run A/B tests, and target specific users — without touching your deployment pipeline. It provides a management API for developers and an SDK endpoint for client applications to evaluate flags in real-time.
+A complete, self-hosted feature flag service that lets you control feature rollouts, run A/B tests, and target specific users without touching your deployment pipeline. It provides a management API for developers and an SDK endpoint for client applications to evaluate flags in real-time.
 
 **Key Features:**
 
-- **Feature Flag Management** — Create, update, and toggle flags across projects and environments
-- **Targeting Rules** — Target users by ID, email address, or email domain
-- **Percentage Rollouts** — Gradual rollouts with consistent, stable hashing (same user always gets the same result)
-- **Multi-Environment Support** — Production, staging, and custom environments per project
-- **SDK Integration** — Lightweight SDK endpoint authenticated with an API key
-- **Analytics** — Every evaluation is logged for dashboards and reporting
-- **Secure** — JWT auth, Argon2 password hashing, user-scoped data access, no secrets in responses
+- **Feature Flag Management**: Create, update, and toggle flags across projects and environments
+- **Targeting Rules**: Target users by ID, email address, or email domain
+- **Percentage Rollouts**: Gradual rollouts with consistent, stable hashing (same user always gets the same result)
+- **Multi-Environment Support**: Production, staging, and custom environments per project
+- **SDK Integration**: Lightweight SDK endpoint authenticated with an API key
+- **Analytics**: Every evaluation is logged for dashboards and reporting
+- **Rate Limiting**: IP-based rate limiting on auth and SDK endpoints to prevent abuse
+- **Secure**: JWT auth, Argon2 password hashing, user-scoped data access, no secrets in responses
 
 ## Architecture Overview
 
@@ -57,7 +58,7 @@ A complete, self-hosted feature flag service that lets you control feature rollo
 
 ### Prerequisites
 
-- **Rust** 1.82+ ([Install](https://www.rust-lang.org/tools/install))
+- **Rust** 1.88+ ([Install](https://www.rust-lang.org/tools/install))
 - **Docker** ([Install](https://docs.docker.com/get-docker/))
 
 ### 5 Steps to Running Locally
@@ -175,7 +176,7 @@ Flag keys must be lowercase letters, numbers, `_`, or `-`, starting with a lette
 
 ### 4. Targeting Rules
 
-Rules evaluate before the rollout percentage. A matching rule immediately returns `true`, regardless of rollout. Rules run in **priority order** — highest number first.
+Rules evaluate before the rollout percentage. A matching rule immediately returns `true`, regardless of rollout. Rules run in **priority order**, highest number first.
 
 | `rule_type` | `rule_value` example | Matches when |
 |---|---|---|
@@ -197,10 +198,10 @@ POST /api/projects/{project_id}/environments/{environment_id}/flags/{flag_id}/ru
 
 The evaluation algorithm in order:
 
-1. **Global switch** — if `enabled = false`, return `false` immediately
-2. **Targeting rules** — evaluate enabled rules, highest priority first; first match returns `true`
-3. **Percentage rollout** — hash `flag_key:user_identifier` with FNV-1a; return `true` if bucket < rollout %
-4. **Default** — if `enabled = true` and no rollout set, return `true` for everyone
+1. **Global switch**: if `enabled = false`, return `false` immediately
+2. **Targeting rules**: evaluate enabled rules, highest priority first; first match returns `true`
+3. **Percentage rollout**: hash `flag_key:user_identifier` with FNV-1a; return `true` if bucket < rollout %
+4. **Default**: if `enabled = true` and no rollout set, return `true` for everyone
 
 **Evaluate all flags for a user:**
 
@@ -249,7 +250,7 @@ Content-Type: application/json
 | POST | `/auth/register` | Register new user |
 | POST | `/auth/login` | Login, receive JWT |
 
-### Management API — `Authorization: Bearer <token>` required
+### Management API (`Authorization: Bearer <token>` required)
 
 **Projects**
 
@@ -293,7 +294,7 @@ Content-Type: application/json
 | PUT | `.../flags/{fid}/rules/{rid}` | Update rule |
 | DELETE | `.../flags/{fid}/rules/{rid}` | Delete rule |
 
-### SDK API — `X-SDK-Key: sdk_...` required
+### SDK API (`X-SDK-Key: sdk_...` required)
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -330,6 +331,7 @@ feature-flag-service-backend/
 │       ├── auth.rs                # Register, login
 │       ├── health.rs              # Health check with DB ping
 │       ├── middleware_auth.rs     # JWT middleware + JwtUser extractor
+│       ├── rate_limit.rs          # IP-based rate limiting middleware
 │       ├── sdk_auth.rs            # SDK key middleware + SdkProject extractor
 │       │
 │       ├── projects/
@@ -350,7 +352,7 @@ feature-flag-service-backend/
 
 | Table | Purpose |
 |---|---|
-| `users` | Auth — email + Argon2 password hash |
+| `users` | Auth: email + Argon2 password hash |
 | `projects` | Top-level grouping; holds the SDK key |
 | `environments` | Scopes flags (production, staging, etc.) |
 | `feature_flags` | Flag config per environment |
@@ -368,12 +370,13 @@ feature-flag-service-backend/
 
 | Component | Technology |
 |---|---|
-| Language | Rust 1.82+ |
+| Language | Rust 1.88+ |
 | Web framework | Axum 0.8 |
 | Database | PostgreSQL 16 |
 | DB driver | SQLx 0.8 (compile-time verified queries) |
 | Async runtime | Tokio |
 | Auth | JWT (jsonwebtoken 9), Argon2 |
+| Rate limiting | governor 0.6 |
 | Observability | tracing + tracing-subscriber |
 | CORS / Timeout | tower-http |
 
@@ -383,11 +386,11 @@ feature-flag-service-backend/
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DATABASE_URL` | Yes | — | Postgres connection string |
-| `JWT_SECRET` | Yes | — | Signing key, minimum 32 characters |
-| `PORT` | Yes | — | Port to listen on |
+| `DATABASE_URL` | Yes | none | Postgres connection string |
+| `JWT_SECRET` | Yes | none | Signing key, minimum 32 characters |
+| `PORT` | Yes | none | Port to listen on |
 | `HOST` | No | `0.0.0.0` | Bind address |
-| `ALLOWED_ORIGIN` | No | `http://localhost:3000` | CORS allowed origin |
+| `ALLOWED_ORIGIN` | No | `http://localhost:3000` | CORS allowed origin. Comma-separated for multiple origins. Use `*` to allow all origins. |
 | `RUST_LOG` | No | `info` | Log level |
 
 Generate a secure JWT secret:
@@ -528,9 +531,9 @@ if (await client.isEnabled('dark_mode', 'production', 'user_42')) {
 
 - Flag evaluation typically completes in **< 10ms** end-to-end (two DB queries: one for flags, one batch for all rules)
 - Evaluation logs are written **asynchronously** (`tokio::spawn`) and never block the response
-- DB pool is capped at **20 connections** with a 5-second acquire timeout
+- DB pool is capped at **20 connections** with a 30-second acquire timeout
 - All requests time out after **30 seconds**
-- Rollout hashing uses FNV-1a — deterministic across deployments, O(1) per user
+- Rollout hashing uses FNV-1a, deterministic across deployments, O(1) per user
 
 ---
 
@@ -540,7 +543,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-MIT — see LICENSE file.
+MIT. See LICENSE file.
 
 ## Support
 
@@ -549,4 +552,4 @@ MIT — see LICENSE file.
 
 ---
 
-Built with Rust 🦀
+Built with Rust.
