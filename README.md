@@ -61,75 +61,30 @@ A complete, self-hosted feature flag service that lets you control feature rollo
 - **Rust** 1.88+ ([Install](https://www.rust-lang.org/tools/install))
 - **Docker** ([Install](https://docs.docker.com/get-docker/))
 
-### 5 Steps to Running Locally
+### Running Locally
 
 ```bash
-# 1. Clone the repository
 git clone git@github.com:Webrowse/feature-flag-service-backend.git
 cd feature-flag-service-backend
-
-# 2. Set up environment variables
 cp .env.example .env
-# Edit .env — at minimum set a secure JWT_SECRET:
-#   openssl rand -base64 48
+# set a secure JWT_SECRET in .env
 
-# 3. Start PostgreSQL
 docker-compose up -d
-
-# 4. Run database migrations
 cargo install sqlx-cli --no-default-features --features postgres
 sqlx migrate run
-
-# 5. Run the service
 cargo run
-# → Listening on http://0.0.0.0:8080
 ```
 
-### Quick Test (curl)
+The service starts on `http://0.0.0.0:8080`.
 
-```bash
-BASE=http://localhost:8080
+### How it works
 
-# Register
-curl -s -X POST $BASE/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"dev@example.com","password":"secure123"}'
+1. Register and log in to get a JWT for the management API.
+2. Create a project to get an SDK key. Production and staging environments are created for you automatically.
+3. Create a feature flag inside an environment. Set a rollout percentage, add targeting rules, or leave it as a simple on/off switch.
+4. Call `/sdk/v1/evaluate` from your application with the SDK key and a user context. The service returns the current state of every flag for that user in one response.
 
-# Login — save the token
-TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"dev@example.com","password":"secure123"}' | jq -r '.token')
-
-# Create a project (also creates production + staging environments)
-PROJECT=$(curl -s -X POST $BASE/api/projects \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"My App"}' | jq -r '.id')
-
-SDK_KEY=$(curl -s $BASE/api/projects/$PROJECT \
-  -H "Authorization: Bearer $TOKEN" | jq -r '.sdk_key')
-
-# Get the production environment ID
-ENV_ID=$(curl -s $BASE/api/projects/$PROJECT/environments \
-  -H "Authorization: Bearer $TOKEN" | jq -r '[.[] | select(.key=="production")][0].id')
-
-# Create a feature flag inside that environment
-FLAG=$(curl -s -X POST $BASE/api/projects/$PROJECT/environments/$ENV_ID/flags \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Dark Mode","key":"dark_mode","enabled":true,"rollout_percentage":50}' \
-  | jq -r '.id')
-
-# Evaluate flags via SDK
-curl -s -X POST $BASE/sdk/v1/evaluate \
-  -H "X-SDK-Key: $SDK_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"environment":"production","context":{"user_id":"user_42"}}'
-```
-
-### Using Postman
-
-Import [postman_collection.json](./postman_collection.json) for a pre-built collection that automatically saves tokens, IDs, and SDK keys across requests.
+For full request and response shapes, see [API.md](./API.md). A [Postman collection](./postman_collection.json) is included that automatically saves tokens and IDs across requests.
 
 ---
 
@@ -137,62 +92,37 @@ Import [postman_collection.json](./postman_collection.json) for a pre-built coll
 
 ### 1. Projects
 
-A project represents one of your applications. Creating a project automatically creates **production** and **staging** environments.
+A project is the top-level container for everything in the service. It represents one of your applications. Each project has a unique SDK key that your application uses to call the evaluation endpoint. When you create a project, the service automatically sets up production and staging environments so you can start using it immediately.
 
-```bash
-POST /api/projects
-{"name": "Mobile App", "description": "iOS and Android"}
-
-# Response includes sdk_key — used by your app to call /sdk/v1/evaluate
-```
+From a project you can: create additional environments, rotate the SDK key if it is ever compromised, update the project name, or delete it. Deleting a project removes all its environments, flags, rules, and evaluation history.
 
 ### 2. Environments
 
-Environments scope flags so production and staging can have independent states. Every flag lives inside an environment.
+Environments let you run the same set of flags with different configurations in production, staging, or any other context you need. A flag enabled in staging has no effect on production. Every flag lives inside exactly one environment.
 
-```bash
-GET  /api/projects/{project_id}/environments
-POST /api/projects/{project_id}/environments
-{"name": "Canary", "key": "canary"}
-```
-
-Environment keys must be lowercase letters, numbers, `_`, or `-`.
+Environment keys must be lowercase letters, numbers, `_`, or `-`. You can add as many environments as you need beyond the default production and staging ones.
 
 ### 3. Feature Flags
 
-A flag is a boolean switch that can target specific users or roll out gradually.
+A flag is a named boolean switch that lives inside an environment. Each flag has a key that your application code references (for example, `dark_mode` or `new_checkout`). You control it in three ways:
 
-```bash
-POST /api/projects/{project_id}/environments/{environment_id}/flags
-{
-  "name": "New Checkout",
-  "key": "new_checkout",
-  "enabled": true,
-  "rollout_percentage": 25
-}
-```
+- **Global switch**: turn the flag completely off for everyone, regardless of rules or rollout
+- **Targeting rules**: return true for specific users immediately, before any rollout logic runs
+- **Rollout percentage**: gradually expose the flag to a percentage of users in a consistent, stable way
 
 Flag keys must be lowercase letters, numbers, `_`, or `-`, starting with a letter.
 
 ### 4. Targeting Rules
 
-Rules evaluate before the rollout percentage. A matching rule immediately returns `true`, regardless of rollout. Rules run in **priority order**, highest number first.
+Targeting rules let you enable a flag for specific users without affecting everyone else. Rules are evaluated in priority order (highest number first), and the first matching rule ends evaluation with a result of `true`.
 
 | `rule_type` | `rule_value` example | Matches when |
 |---|---|---|
-| `user_id` | `"user_12345"` | context.user_id equals value |
-| `user_email` | `"alice@example.com"` | context.user_email equals value |
-| `email_domain` | `"@company.com"` | email ends with this domain |
+| `user_id` | `"user_12345"` | context.user_id equals the value |
+| `user_email` | `"alice@example.com"` | context.user_email equals the value |
+| `email_domain` | `"@company.com"` | context.user_email ends with this domain |
 
-```bash
-POST /api/projects/{project_id}/environments/{environment_id}/flags/{flag_id}/rules
-{
-  "rule_type": "email_domain",
-  "rule_value": "@yourcompany.com",
-  "priority": 100,
-  "enabled": true
-}
-```
+Rules run before the rollout percentage. A user who matches a rule always gets `true`, even if the rollout is set to 0%.
 
 ### 5. Flag Evaluation
 
@@ -421,31 +351,13 @@ cargo sqlx prepare
 
 ---
 
-## Production Deployment
+## Deploying
 
-### Docker (manual)
+The project ships with a multi-stage Dockerfile. Push to GitHub and connect your repo to Railway: it detects the Dockerfile and builds automatically. Add a PostgreSQL database from the Railway dashboard, set the required environment variables, and run migrations once via the Railway shell.
 
-```bash
-docker build -t feature-flag-service .
+Required variables: `DATABASE_URL`, `JWT_SECRET`, `PORT`, `ALLOWED_ORIGIN`.
 
-docker run -d \
-  -e DATABASE_URL="postgres://..." \
-  -e JWT_SECRET="..." \
-  -e ALLOWED_ORIGIN="https://your-frontend.com" \
-  -e PORT=8080 \
-  -p 8080:8080 \
-  feature-flag-service
-```
-
-### Railway (recommended)
-
-1. Push to GitHub
-2. New project → Deploy from GitHub repo (Railway detects the Dockerfile)
-3. Add a PostgreSQL database from the Railway dashboard
-4. Set `JWT_SECRET`, `ALLOWED_ORIGIN`, `PORT=8080` in Variables
-5. Run migrations via the Railway shell: `sqlx migrate run`
-
-The CI/CD workflow in `.github/workflows/ci.yml` runs tests on every push and deploys automatically on merge to `master`.
+The CI/CD workflow in `.github/workflows/ci.yml` runs fmt, clippy, and tests on every push, then builds and pushes a Docker image on merge to master.
 
 ---
 
@@ -453,77 +365,19 @@ The CI/CD workflow in `.github/workflows/ci.yml` runs tests on every push and de
 
 ### Gradual rollout
 
-```bash
-# Start at 10%, increase over time
-curl -X POST .../flags \
-  -d '{"name":"New UI","key":"new_ui","enabled":true,"rollout_percentage":10}'
+Create a flag with `rollout_percentage` set to 10. Users are assigned to a bucket using a deterministic hash of their user ID and the flag key, so the same user always gets the same result across requests. When you are confident in the change, update the percentage to 50, then 100. No redeployment needed at any step.
 
-curl -X PUT .../flags/$FLAG_ID \
-  -d '{"rollout_percentage":50}'
+### Internal beta
 
-curl -X PUT .../flags/$FLAG_ID \
-  -d '{"rollout_percentage":100}'
-```
-
-### Internal beta (company email domain)
-
-```bash
-curl -X POST .../flags/$FLAG_ID/rules \
-  -d '{"rule_type":"email_domain","rule_value":"@yourcompany.com","priority":100}'
-```
+Add an `email_domain` rule for `@yourcompany.com`. All employees match the rule and get the flag enabled immediately, regardless of the rollout percentage. Everyone else is subject to the normal rollout or sees the flag as disabled.
 
 ### VIP early access
 
-```bash
-curl -X POST .../flags/$FLAG_ID/rules \
-  -d '{"rule_type":"user_email","rule_value":"vip@example.com","priority":100}'
-```
+Add a `user_email` rule for a specific account. That user gets access right away. You can stack multiple rules at different priority levels to handle complex targeting without touching code.
 
 ### Emergency kill switch
 
-```bash
-curl -X POST .../flags/$FLAG_ID/toggle
-```
-
----
-
-## Client Integration
-
-### JavaScript / TypeScript
-
-```typescript
-class FeatureFlagClient {
-  constructor(private sdkKey: string, private baseUrl: string) {}
-
-  async evaluate(environment: string, userId: string, userEmail?: string) {
-    const res = await fetch(`${this.baseUrl}/sdk/v1/evaluate`, {
-      method: 'POST',
-      headers: {
-        'X-SDK-Key': this.sdkKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        environment,
-        context: { user_id: userId, user_email: userEmail },
-      }),
-    });
-    const data = await res.json();
-    return data.flags as Record<string, { enabled: boolean; reason: string }>;
-  }
-
-  async isEnabled(flag: string, environment: string, userId: string) {
-    const flags = await this.evaluate(environment, userId);
-    return flags[flag]?.enabled ?? false;
-  }
-}
-
-// Usage
-const client = new FeatureFlagClient('sdk_abc123...', 'https://your-api.railway.app');
-
-if (await client.isEnabled('dark_mode', 'production', 'user_42')) {
-  enableDarkMode();
-}
-```
+Toggle a flag off by calling the toggle endpoint. The change takes effect on the next evaluation call. No deployment, no config change, no incident required.
 
 ---
 
