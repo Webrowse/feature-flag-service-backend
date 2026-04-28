@@ -13,6 +13,7 @@ mod flags;
 mod health;
 mod middleware_auth;
 mod projects;
+mod rate_limit;
 mod rules;
 mod sdk;
 mod sdk_auth;
@@ -70,11 +71,18 @@ pub fn routes(state: AppState) -> Router {
                 .delete(environments::routes::delete),
         );
 
+    let auth_router = Router::new()
+        .route("/auth/register", post(register))
+        .route("/auth/login", post(login))
+        .layer(middleware::from_fn_with_state(
+            rate_limit::per_minute(10),
+            rate_limit::by_ip,
+        ));
+
     Router::new()
         .route("/", get(root))
         .route("/health", get(health::health))
-        .route("/auth/register", post(register))
-        .route("/auth/login", post(login))
+        .merge(auth_router)
         .nest(
             "/api",
             Router::new()
@@ -94,9 +102,14 @@ pub fn routes(state: AppState) -> Router {
             "/sdk/v1",
             Router::new()
                 .route("/evaluate", post(sdk::routes::evaluate))
+                // sdk_auth runs after the rate limit check
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     sdk_auth::require_sdk_key,
+                ))
+                .layer(middleware::from_fn_with_state(
+                    rate_limit::per_minute(200),
+                    rate_limit::by_ip,
                 )),
         )
         .with_state(state)
