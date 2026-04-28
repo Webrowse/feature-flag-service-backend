@@ -83,17 +83,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           # Cache layers between runs using the registry itself.
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:cache,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
 
   # ── Deploy (master only, after image is pushed) ───────────────────────────────
   # Uncomment and adapt one of the blocks below for your hosting platform.
