@@ -28,18 +28,20 @@ async fn main() {
         .connect_lazy(&config.database_url)
         .expect("Invalid DATABASE_URL");
 
-    let allow_origin = if config.allowed_origin.trim() == "*" {
-        tracing::warn!("ALLOWED_ORIGIN=* — accepting all origins");
+    let parts: Vec<&str> = config
+        .allowed_origin
+        .split(',')
+        .map(|o| o.trim())
+        .filter(|o| !o.is_empty())
+        .collect();
+
+    let allow_origin = if parts.contains(&"*") {
+        tracing::warn!("ALLOWED_ORIGIN contains wildcard — accepting all origins");
         AllowOrigin::any()
     } else {
-        let origins: Vec<HeaderValue> = config
-            .allowed_origin
-            .split(',')
-            .map(|o| {
-                o.trim()
-                    .parse()
-                    .expect("ALLOWED_ORIGIN contains invalid value")
-            })
+        let origins: Vec<HeaderValue> = parts
+            .iter()
+            .map(|o| o.parse().expect("ALLOWED_ORIGIN contains invalid value"))
             .collect();
         tracing::info!("Allowed origins: {:?}", origins);
         AllowOrigin::list(origins)
