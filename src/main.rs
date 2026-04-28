@@ -27,13 +27,14 @@ async fn main() {
         .connect_lazy(&config.database_url)
         .expect("Invalid DATABASE_URL");
 
-    let allowed_origin: HeaderValue = config
+    let allowed_origins: Vec<HeaderValue> = config
         .allowed_origin
-        .parse()
-        .expect("ALLOWED_ORIGIN is not a valid header value");
+        .split(',')
+        .map(|o| o.trim().parse().expect("ALLOWED_ORIGIN contains invalid value"))
+        .collect();
 
     let cors = CorsLayer::new()
-        .allow_origin(allowed_origin)
+        .allow_origin(allowed_origins)
         .allow_methods([
             Method::GET,
             Method::POST,
