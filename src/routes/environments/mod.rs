@@ -46,7 +46,7 @@ pub fn validate_environment_key(key: &str) -> Result<(), String> {
     if key.len() > 64 {
         return Err("Environment key is too long (max 64 characters)".to_string());
     }
-    if !key.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+    if !key.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         return Err("Environment key must start with a lowercase letter".to_string());
     }
     if !key

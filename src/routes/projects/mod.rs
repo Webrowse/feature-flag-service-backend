@@ -47,7 +47,7 @@ pub fn generate_sdk_key() -> String {
     let key: String = (0..KEY_LENGTH)
         .map(|_| CHARSET[rng.gen_range(0..CHARSET.len())] as char)
         .collect();
-    format!("sdk_{}", key)
+    format!("sdk_{key}")
 }
 
 #[cfg(test)]

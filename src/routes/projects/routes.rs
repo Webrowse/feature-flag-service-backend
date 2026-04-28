@@ -25,7 +25,7 @@ fn validate_name(name: &str) -> Result<(), (StatusCode, String)> {
     if trimmed.len() > MAX_NAME_LEN {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("Name must be {} characters or fewer", MAX_NAME_LEN),
+            format!("Name must be {MAX_NAME_LEN} characters or fewer"),
         ));
     }
     Ok(())
@@ -79,7 +79,7 @@ pub async fn create(
         .bind(project.id)
         .bind(*env_name)
         .bind(*env_key)
-        .bind(format!("{} environment", env_name))
+        .bind(format!("{env_name} environment"))
         .execute(&mut *tx)
         .await
         .map_err(|e| {

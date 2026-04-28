@@ -23,7 +23,7 @@ fn validate_name(name: &str) -> Result<(), (StatusCode, String)> {
     if t.len() > MAX_NAME_LEN {
         return Err((
             StatusCode::BAD_REQUEST,
-            format!("Name must be {} characters or fewer", MAX_NAME_LEN),
+            format!("Name must be {MAX_NAME_LEN} characters or fewer"),
         ));
     }
     Ok(())

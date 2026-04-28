@@ -56,7 +56,7 @@ pub fn validate_flag_key(key: &str) -> Result<(), String> {
     if key.len() > 64 {
         return Err("Flag key is too long (max 64 characters)".to_string());
     }
-    if !key.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+    if !key.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         return Err("Flag key must start with a lowercase letter".to_string());
     }
     if !key

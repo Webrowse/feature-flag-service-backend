@@ -45,8 +45,7 @@ pub fn validate_rule_type(rule_type: &str) -> Result<(), String> {
     match rule_type {
         "user_id" | "user_email" | "email_domain" => Ok(()),
         _ => Err(format!(
-            "Invalid rule type '{}'. Must be one of: user_id, user_email, email_domain",
-            rule_type
+            "Invalid rule type '{rule_type}'. Must be one of: user_id, user_email, email_domain",
         )),
     }
 }

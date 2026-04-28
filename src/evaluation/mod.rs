@@ -52,12 +52,12 @@ pub fn evaluate_flag(flag: &FlagData, rules: &[RuleData], context: &UserContext)
             "user_id" => context
                 .user_id
                 .as_deref()
-                .map_or(false, |id| id == rule.rule_value),
+                .is_some_and(|id| id == rule.rule_value),
             "user_email" => context
                 .user_email
                 .as_deref()
-                .map_or(false, |email| email == rule.rule_value),
-            "email_domain" => context.user_email.as_deref().map_or(false, |email| {
+                .is_some_and(|email| email == rule.rule_value),
+            "email_domain" => context.user_email.as_deref().is_some_and(|email| {
                 // rule_value starts with '@' (enforced by validation + DB CHECK).
                 email.ends_with(rule.rule_value.as_str())
             }),
@@ -68,7 +68,10 @@ pub fn evaluate_flag(flag: &FlagData, rules: &[RuleData], context: &UserContext)
             return FlagEvaluation {
                 enabled: true,
                 // Never echo back rule_value — it would disclose targeting lists to SDK callers.
-                reason: format!("Matched {} targeting rule", rule.rule_type),
+                reason: format!(
+                    "Matched {rule_type} targeting rule",
+                    rule_type = rule.rule_type
+                ),
             };
         }
     }
@@ -117,7 +120,7 @@ fn should_enable_for_percentage(flag_key: &str, user_identifier: &str, percentag
     if percentage >= 100 {
         return true;
     }
-    let key = format!("{}:{}", flag_key, user_identifier);
+    let key = format!("{flag_key}:{user_identifier}");
     let bucket = (fnv1a(&key) % 100) as i32;
     bucket < percentage
 }

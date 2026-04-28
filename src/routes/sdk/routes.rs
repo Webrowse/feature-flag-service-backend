@@ -64,7 +64,7 @@ pub async fn evaluate(
         None => {
             return Err((
                 StatusCode::NOT_FOUND,
-                format!("Environment '{}' not found", environment_key),
+                format!("Environment '{environment_key}' not found"),
             ));
         }
     };
