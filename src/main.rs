@@ -6,7 +6,8 @@ mod state;
 use axum::http::{header, HeaderValue, Method};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
-use tower_http::{cors::CorsLayer, timeout::TimeoutLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::timeout::TimeoutLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -27,18 +28,25 @@ async fn main() {
         .connect_lazy(&config.database_url)
         .expect("Invalid DATABASE_URL");
 
-    let allowed_origins: Vec<HeaderValue> = config
-        .allowed_origin
-        .split(',')
-        .map(|o| {
-            o.trim()
-                .parse()
-                .expect("ALLOWED_ORIGIN contains invalid value")
-        })
-        .collect();
+    let allow_origin = if config.allowed_origin.trim() == "*" {
+        tracing::warn!("ALLOWED_ORIGIN=* — accepting all origins");
+        AllowOrigin::any()
+    } else {
+        let origins: Vec<HeaderValue> = config
+            .allowed_origin
+            .split(',')
+            .map(|o| {
+                o.trim()
+                    .parse()
+                    .expect("ALLOWED_ORIGIN contains invalid value")
+            })
+            .collect();
+        tracing::info!("Allowed origins: {:?}", origins);
+        AllowOrigin::list(origins)
+    };
 
     let cors = CorsLayer::new()
-        .allow_origin(allowed_origins)
+        .allow_origin(allow_origin)
         .allow_methods([
             Method::GET,
             Method::POST,
