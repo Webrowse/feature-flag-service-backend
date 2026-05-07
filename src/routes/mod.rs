@@ -18,7 +18,7 @@ mod rules;
 mod sdk;
 mod sdk_auth;
 
-use crate::routes::auth::{login, register};
+use crate::routes::auth::{forgot_password, login, register, reset_password};
 use crate::routes::middleware_auth::JwtUser;
 use crate::state::AppState;
 
@@ -74,6 +74,8 @@ pub fn routes(state: AppState) -> Router {
     let auth_router = Router::new()
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
+        .route("/auth/forgot-password", post(forgot_password))
+        .route("/auth/reset-password", post(reset_password))
         .layer(middleware::from_fn_with_state(
             rate_limit::per_minute(10),
             rate_limit::by_ip,
