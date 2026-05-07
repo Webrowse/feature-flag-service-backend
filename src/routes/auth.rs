@@ -78,7 +78,7 @@ fn generate_reset_token() -> String {
 
 fn hash_reset_token(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
-    format!("{:x}", digest)
+    format!("{digest:x}")
 }
 
 pub async fn register(
