@@ -246,11 +246,7 @@ pub async fn forgot_password(
             return (StatusCode::OK, generic_response).into_response();
         }
 
-        tracing::info!(
-            "Password reset requested for user_id={} token={} (send this via email in production)",
-            user_id,
-            token
-        );
+        tracing::info!("Password reset requested for user_id={}", user_id);
     }
 
     (StatusCode::OK, generic_response).into_response()
