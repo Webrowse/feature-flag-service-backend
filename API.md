@@ -91,7 +91,7 @@ Content-Type: application/json
 
 **Validation:**
 - Email must be valid format and unique
-- Password must be at least 6 characters
+- Password must be at least 8 characters
 - Password is hashed with Argon2 before storage
 
 #### Login
@@ -118,6 +118,53 @@ Content-Type: application/json
 **Notes:**
 - Token is valid for 24 hours
 - Include token in `Authorization: Bearer {token}` header for all `/api/*` requests
+
+#### Forgot Password
+
+Request a password reset for an email address.
+
+```http
+POST /auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "developer@example.com"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "If the account exists, a reset link has been sent."
+}
+```
+
+**Notes:**
+- Returns the same response regardless of whether the email exists.
+- Reset tokens are single-use and expire after 30 minutes.
+
+#### Reset Password
+
+Reset account password using a valid reset token.
+
+```http
+POST /auth/reset-password
+Content-Type: application/json
+
+{
+  "token": "reset_token_from_email",
+  "new_password": "new_secure_password_123"
+}
+```
+
+**Response (200 OK):**
+```
+Password reset successful
+```
+
+**Validation:**
+- `new_password` must be at least 8 characters.
+- Token must be valid, unexpired, and unused.
 
 ### Current User
 
