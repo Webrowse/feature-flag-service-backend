@@ -25,8 +25,14 @@ async fn main() {
         .max_connections(20)
         .acquire_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(600))
-        .connect_lazy(&config.database_url)
-        .expect("Invalid DATABASE_URL");
+        .connect(&config.database_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .expect("Failed to run database migrations");
 
     let parts: Vec<&str> = config
         .allowed_origin
