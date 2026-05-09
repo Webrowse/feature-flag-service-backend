@@ -375,5 +375,11 @@ pub async fn reset_password(
         return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
     }
 
-    (StatusCode::OK, "Password reset successful").into_response()
+    (
+        StatusCode::OK,
+        Json(ForgotPasswordResponse {
+            message: "Password reset successful".to_string(),
+        }),
+    )
+        .into_response()
 }
