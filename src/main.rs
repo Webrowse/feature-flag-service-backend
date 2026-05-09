@@ -75,7 +75,12 @@ async fn main() {
             use lettre::transport::smtp::authentication::Credentials;
             use lettre::{AsyncSmtpTransport, Tokio1Executor};
             let creds = Credentials::new(username.clone(), password.clone());
-            match AsyncSmtpTransport::<Tokio1Executor>::relay(host) {
+            let builder = if config.smtp_port == 465 {
+                AsyncSmtpTransport::<Tokio1Executor>::relay(host)
+            } else {
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
+            };
+            match builder {
                 Ok(builder) => {
                     tracing::info!("SMTP configured ({}:{})", host, config.smtp_port);
                     Some(builder.credentials(creds).port(config.smtp_port).build())
