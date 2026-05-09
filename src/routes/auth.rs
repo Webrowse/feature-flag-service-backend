@@ -9,6 +9,7 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use lettre::{message::header::ContentType, AsyncTransport, Message};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -52,6 +53,7 @@ pub struct ForgotPasswordResponse {
 #[derive(Deserialize)]
 pub struct ResetPasswordRequest {
     pub token: String,
+    #[serde(rename = "newPassword")]
     pub new_password: String,
 }
 
@@ -247,6 +249,38 @@ pub async fn forgot_password(
         }
 
         tracing::info!("Password reset requested for user_id={}", user_id);
+
+        if let Some(ref mailer) = state.mailer {
+            let reset_url = format!("{}/reset-password?token={}", state.app_url, token);
+            let body = format!(
+                "You requested a password reset.\n\nReset your password here:\n\n{}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, ignore this email.",
+                reset_url
+            );
+            match (
+                state.smtp_from.parse::<lettre::message::Mailbox>(),
+                email.parse::<lettre::message::Mailbox>(),
+            ) {
+                (Ok(from), Ok(to)) => {
+                    match Message::builder()
+                        .from(from)
+                        .to(to)
+                        .subject("Password Reset Request")
+                        .header(ContentType::TEXT_PLAIN)
+                        .body(body)
+                    {
+                        Ok(msg) => {
+                            if let Err(e) = mailer.send(msg).await {
+                                tracing::error!("Failed to send password reset email to {}: {}", email, e);
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to build reset email: {}", e),
+                    }
+                }
+                _ => tracing::error!("Invalid mailbox address for reset email"),
+            }
+        } else {
+            tracing::warn!("SMTP not configured; reset token for {} was not emailed", email);
+        }
     }
 
     (StatusCode::OK, generic_response).into_response()

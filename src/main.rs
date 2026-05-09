@@ -60,9 +60,34 @@ async fn main() {
 
     let addr = config.addr();
 
+    let mailer = match (&config.smtp_host, &config.smtp_username, &config.smtp_password) {
+        (Some(host), Some(username), Some(password)) => {
+            use lettre::transport::smtp::authentication::Credentials;
+            use lettre::{AsyncSmtpTransport, Tokio1Executor};
+            let creds = Credentials::new(username.clone(), password.clone());
+            match AsyncSmtpTransport::<Tokio1Executor>::relay(host) {
+                Ok(builder) => {
+                    tracing::info!("SMTP configured ({}:{})", host, config.smtp_port);
+                    Some(builder.credentials(creds).port(config.smtp_port).build())
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to create SMTP transport: {}", e);
+                    None
+                }
+            }
+        }
+        _ => {
+            tracing::warn!("SMTP_HOST/SMTP_USERNAME/SMTP_PASSWORD not set — password reset emails will not be sent");
+            None
+        }
+    };
+
     let state = state::AppState {
         db,
         jwt_secret: config.jwt_secret,
+        mailer,
+        smtp_from: config.smtp_from,
+        app_url: config.app_url,
     };
 
     let app = routes::routes(state)
