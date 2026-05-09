@@ -253,8 +253,7 @@ pub async fn forgot_password(
         if let Some(ref mailer) = state.mailer {
             let reset_url = format!("{}/reset-password?token={}", state.app_url, token);
             let body = format!(
-                "You requested a password reset.\n\nReset your password here:\n\n{}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, ignore this email.",
-                reset_url
+                "You requested a password reset.\n\nReset your password here:\n\n{reset_url}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, ignore this email."
             );
             match (
                 state.smtp_from.parse::<lettre::message::Mailbox>(),
@@ -270,7 +269,11 @@ pub async fn forgot_password(
                     {
                         Ok(msg) => {
                             if let Err(e) = mailer.send(msg).await {
-                                tracing::error!("Failed to send password reset email to {}: {}", email, e);
+                                tracing::error!(
+                                    "Failed to send password reset email to {}: {}",
+                                    email,
+                                    e
+                                );
                             }
                         }
                         Err(e) => tracing::error!("Failed to build reset email: {}", e),
@@ -279,7 +282,10 @@ pub async fn forgot_password(
                 _ => tracing::error!("Invalid mailbox address for reset email"),
             }
         } else {
-            tracing::warn!("SMTP not configured; reset token for {} was not emailed", email);
+            tracing::warn!(
+                "SMTP not configured; reset token for {} was not emailed",
+                email
+            );
         }
     }
 

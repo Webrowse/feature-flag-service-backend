@@ -60,7 +60,11 @@ async fn main() {
 
     let addr = config.addr();
 
-    let mailer = match (&config.smtp_host, &config.smtp_username, &config.smtp_password) {
+    let mailer = match (
+        &config.smtp_host,
+        &config.smtp_username,
+        &config.smtp_password,
+    ) {
         (Some(host), Some(username), Some(password)) => {
             use lettre::transport::smtp::authentication::Credentials;
             use lettre::{AsyncSmtpTransport, Tokio1Executor};

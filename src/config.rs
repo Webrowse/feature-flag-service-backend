@@ -45,10 +45,8 @@ impl Config {
             .unwrap_or(587u16);
         let smtp_username = env::var("SMTP_USERNAME").ok();
         let smtp_password = env::var("SMTP_PASSWORD").ok();
-        let smtp_from =
-            env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@example.com".to_string());
-        let app_url =
-            env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let smtp_from = env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@example.com".to_string());
+        let app_url = env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         Self {
             port,
