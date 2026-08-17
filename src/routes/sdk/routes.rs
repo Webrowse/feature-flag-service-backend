@@ -160,24 +160,23 @@ pub async fn evaluate(
         eval_results.push(evaluation.enabled);
     }
 
-    // Fire-and-forget: log evaluations without blocking the response.
-    let db = state.db.clone();
-    tokio::spawn(async move {
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO flag_evaluations (flag_id, user_identifier, result)
-            SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::bool[])
-            "#,
-        )
-        .bind(&eval_flag_ids)
-        .bind(&eval_user_ids)
-        .bind(&eval_results)
-        .execute(&db)
-        .await
-        {
-            tracing::error!("Failed to write evaluation logs: {}", e);
-        }
-    });
+    // Awaited, not fire-and-forget: under a request-scoped execution model
+    // (Cloud Run) CPU is throttled to near zero once the response is written, so a
+    // spawned task may never run and analytics would silently stop recording.
+    if let Err(e) = sqlx::query(
+        r#"
+        INSERT INTO flag_evaluations (flag_id, user_identifier, result)
+        SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::bool[])
+        "#,
+    )
+    .bind(&eval_flag_ids)
+    .bind(&eval_user_ids)
+    .bind(&eval_results)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!("Failed to write evaluation logs: {}", e);
+    }
 
     Ok(Json(EvaluateResponse {
         flags: result_flags,

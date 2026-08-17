@@ -253,37 +253,38 @@ pub async fn forgot_password(
         if let Some(mailer) = state.mailer.clone() {
             let reset_url = format!("{}/reset-password?token={}", state.app_url, token);
             let smtp_from = state.smtp_from.clone();
-            tokio::spawn(async move {
-                let body = format!(
-                    "You requested a password reset.\n\nReset your password here:\n\n{reset_url}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, ignore this email."
-                );
-                match (
-                    smtp_from.parse::<lettre::message::Mailbox>(),
-                    email.parse::<lettre::message::Mailbox>(),
-                ) {
-                    (Ok(from), Ok(to)) => {
-                        match Message::builder()
-                            .from(from)
-                            .to(to)
-                            .subject("Password Reset Request")
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(body)
-                        {
-                            Ok(msg) => {
-                                if let Err(e) = mailer.send(msg).await {
-                                    tracing::error!(
-                                        "Failed to send password reset email to {}: {}",
-                                        email,
-                                        e
-                                    );
-                                }
+            // Sent inline, not in a detached task: under a request-scoped execution
+            // model (Cloud Run) CPU is throttled to near zero once the response is
+            // written, so a spawned task may never run.
+            let body = format!(
+                "You requested a password reset.\n\nReset your password here:\n\n{reset_url}\n\nThis link expires in 30 minutes.\n\nIf you did not request this, ignore this email."
+            );
+            match (
+                smtp_from.parse::<lettre::message::Mailbox>(),
+                email.parse::<lettre::message::Mailbox>(),
+            ) {
+                (Ok(from), Ok(to)) => {
+                    match Message::builder()
+                        .from(from)
+                        .to(to)
+                        .subject("Password Reset Request")
+                        .header(ContentType::TEXT_PLAIN)
+                        .body(body)
+                    {
+                        Ok(msg) => {
+                            if let Err(e) = mailer.send(msg).await {
+                                tracing::error!(
+                                    "Failed to send password reset email to {}: {}",
+                                    email,
+                                    e
+                                );
                             }
-                            Err(e) => tracing::error!("Failed to build reset email: {}", e),
                         }
+                        Err(e) => tracing::error!("Failed to build reset email: {}", e),
                     }
-                    _ => tracing::error!("Invalid mailbox address for reset email"),
                 }
-            });
+                _ => tracing::error!("Invalid mailbox address for reset email"),
+            }
         } else {
             tracing::warn!(
                 "SMTP not configured; reset token for {} was not emailed",

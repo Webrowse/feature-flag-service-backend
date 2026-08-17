@@ -22,7 +22,9 @@ async fn main() {
     let config = config::Config::from_env();
 
     let db = PgPoolOptions::new()
-        .max_connections(20)
+        // Neon's free tier is small and autosuspends; a modest pool against the
+        // pooled endpoint is the right shape.
+        .max_connections(5)
         .acquire_timeout(Duration::from_secs(30))
         .idle_timeout(Duration::from_secs(600))
         .connect(&config.database_url)

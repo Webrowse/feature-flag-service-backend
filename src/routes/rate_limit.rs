@@ -17,10 +17,18 @@ pub fn per_minute(n: u32) -> Limiter {
 }
 
 fn client_ip(req: &Request) -> String {
+    // Behind Cloudflare, CF-Connecting-IP is the only header the edge sets to the
+    // true client address; without it every request shares one proxy hop's IP and
+    // the limiter degrades from per-IP to global.
     req.headers()
-        .get("x-forwarded-for")
+        .get("cf-connecting-ip")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
+        .or_else(|| {
+            req.headers()
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+        })
         .or_else(|| req.headers().get("x-real-ip").and_then(|v| v.to_str().ok()))
         .unwrap_or("unknown")
         .trim()
