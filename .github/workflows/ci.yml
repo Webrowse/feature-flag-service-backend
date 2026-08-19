@@ -51,7 +51,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
+        run: cargo install sqlx-cli --version 0.8.6 --no-default-features --features postgres --locked
 
       - name: Run migrations
         run: sqlx migrate run
